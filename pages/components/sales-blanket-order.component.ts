@@ -28,6 +28,8 @@ const DEFAULT_LOCATORS: SalesBlanketOrderLocators = {
  * Layer 1 — Sales module: create blanket order with order lines.
  */
 export class SalesBlanketOrderComponent extends BasePage {
+  private lastProductSearch = '';
+
   constructor(
     page: Page,
     private readonly locators: SalesBlanketOrderLocators = DEFAULT_LOCATORS
@@ -231,11 +233,36 @@ export class SalesBlanketOrderComponent extends BasePage {
     await this.interaction.dismissBlockingDialogs();
   }
 
+  private async selectOdooAutocompleteByIndex(searchText: string, index: number): Promise<void> {
+    const options = this.page.locator('.ui-autocomplete li:visible a, .ui-autocomplete li:visible');
+    await options.first().waitFor({ state: 'visible', timeout: 15_000 });
+    const count = await options.count();
+    await options.nth(Math.min(index, count - 1)).click();
+  }
+
+  private async changeProductLineAlternative(productSearch: string, attempt: number): Promise<void> {
+    await this.openOrderLinesTab();
+    const lineRow = this.orderLineRowLocator();
+    const productField = lineRow.locator('input.ui-autocomplete-input, [name="product_id"] input').first();
+
+    await productField.click();
+    await productField.fill('');
+    await productField.fill(productSearch);
+
+    await this.page
+      .waitForResponse((response) => response.url().includes('call_kw') && response.ok())
+      .catch(() => null);
+
+    await this.selectOdooAutocompleteByIndex(productSearch, attempt);
+    await this.fillAnalyticGroupOnLine();
+  }
+
   async addProductLine(
     productSearch: string,
     productOption: string | RegExp,
     quantity: string
   ): Promise<void> {
+    this.lastProductSearch = productSearch;
     await this.openOrderLinesTab();
 
     const addButton = this.page.getByRole('button', { name: this.locators.addLineButton });
@@ -276,45 +303,37 @@ export class SalesBlanketOrderComponent extends BasePage {
     return this.page.getByRole('heading', { name: /^new$/i }).isVisible().catch(() => false);
   }
 
-  private async fillUniqueDateRange(attempt = 0): Promise<void> {
-    const offset = 50 + Math.floor(Math.random() * 250) + attempt * 17;
+  private generateUniqueDates(attempt = 0): { startDate: string; endDate: string } {
+    // Hindari duplikat BO: offset besar + jitter ms + attempt agar unik tiap run/retry
+    const offsetDays = 120 + ((Date.now() % 1_000_000) + attempt * 17_371) % 2_400;
     const start = new Date();
-    start.setDate(start.getDate() + offset);
+    start.setDate(start.getDate() + offsetDays);
     const end = new Date(start);
-    end.setDate(end.getDate() + 30);
+    end.setDate(end.getDate() + 31 + (attempt % 7));
 
-    const startDate = this.page.getByRole('textbox', { name: /^start date$/i }).first();
-    const endDate = this.page.getByRole('textbox', { name: /^end date$/i }).first();
+    return { startDate: this.formatUsDate(start), endDate: this.formatUsDate(end) };
+  }
 
-    await startDate.click();
-    await startDate.fill(this.formatUsDate(start));
-    await startDate.press('Tab').catch(() => undefined);
+  /** Set Start/End Date unik — panggil setelah selectCustomer, sebelum save. */
+  async applyUniqueDates(attempt = 0): Promise<void> {
+    const { startDate, endDate } = this.generateUniqueDates(attempt);
+    await this.setStartDate(startDate, endDate);
+  }
 
-    if (await endDate.count()) {
-      await endDate.click();
-      await endDate.fill(this.formatUsDate(end));
-      await endDate.press('Tab').catch(() => undefined);
-    }
-
-    await this.interaction.dismissBlockingDialogs();
+  private async fillUniqueDateRange(attempt = 0): Promise<void> {
+    const { startDate, endDate } = this.generateUniqueDates(attempt);
+    await this.setStartDate(startDate, endDate);
   }
 
   private async ensureMandatoryFields(): Promise<void> {
-    if (await this.isNewBlanketOrder()) {
-      await this.fillUniqueDateRange();
-      return;
-    }
-
     const startDate = this.page.getByRole('textbox', { name: /^start date$/i }).first();
-    if (await startDate.count()) {
-      const val = (await startDate.inputValue()).trim();
-      if (!val) {
-        await this.fillUniqueDateRange();
-      }
+    const val = (await startDate.inputValue().catch(() => '')).trim();
+    if (!val) {
+      await this.fillUniqueDateRange();
     }
   }
 
-  private async editAndRefreshDates(attempt = 1): Promise<void> {
+  private async editAndRefreshForDuplicate(attempt = 1): Promise<void> {
     await this.interaction.dismissBlockingDialogs();
 
     const saveButton = this.page.locator('[data-uniq="btn_saleblanket.saleblanket_save"]');
@@ -326,12 +345,18 @@ export class SalesBlanketOrderComponent extends BasePage {
     }
 
     await this.fillUniqueDateRange(attempt);
+
+    if (this.lastProductSearch) {
+      await this.changeProductLineAlternative(this.lastProductSearch, attempt);
+    }
+
     await this.save();
     await this.expectBlanketOrderSaved();
   }
 
   async save(): Promise<void> {
     await this.ensureMandatoryFields();
+    await this.page.keyboard.press('Escape').catch(() => undefined);
     await this.interaction.dismissBlockingDialogs();
     await this.page
       .locator('.blockUI.blockOverlay')
@@ -343,15 +368,34 @@ export class SalesBlanketOrderComponent extends BasePage {
       .or(this.page.getByRole('button', { name: this.locators.saveButton }))
       .first();
 
+    await expect(saveButton).toBeEnabled({ timeout: 15_000 });
     await saveButton.scrollIntoViewIfNeeded();
+
+    const saveResponse = this.page
+      .waitForResponse(
+        (response) =>
+          response.url().includes('call_kw') &&
+          response.request().method() === 'POST' &&
+          (response.request().postData() ?? '').includes('web_save'),
+        { timeout: 60_000 }
+      )
+      .catch(() => null);
+
     await saveButton.click();
-    await this.waitForPageLoad();
+    await saveResponse;
     await this.interaction.dismissBlockingDialogs();
   }
 
   async expectBlanketOrderSaved(): Promise<void> {
     await expect(this.page.getByText('Invalid fields:')).not.toBeVisible();
-    await expect(this.page).toHaveURL(/id=\d+/, { timeout: 60_000 });
+
+    await expect
+      .poll(async () => {
+        if (/id=\d+/.test(this.page.url())) return true;
+        const heading = ((await this.page.locator('h1').first().textContent()) ?? '').trim();
+        return heading.length > 0 && !/^new$/i.test(heading);
+      }, { timeout: 60_000 })
+      .toBe(true);
   }
 
   private async confirmDialogIfPresent(): Promise<void> {
@@ -371,7 +415,7 @@ export class SalesBlanketOrderComponent extends BasePage {
 
   private async dismissDuplicateBlanketModal(): Promise<boolean> {
     const validationModal = this.page.locator('.modal.show').filter({
-      hasText: /validation error|matches existing blanket orders/i,
+      hasText: /validation error|matches existing blanket order/i,
     });
 
     if (!(await validationModal.isVisible().catch(() => false))) {
@@ -391,13 +435,13 @@ export class SalesBlanketOrderComponent extends BasePage {
   }
 
   async requestForApproval(): Promise<void> {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 5; attempt++) {
       if (await this.isWaitingForApproval()) {
         return;
       }
 
       if (await this.dismissDuplicateBlanketModal()) {
-        await this.editAndRefreshDates(attempt + 1);
+        await this.editAndRefreshForDuplicate(attempt + 1);
         continue;
       }
 
@@ -405,6 +449,7 @@ export class SalesBlanketOrderComponent extends BasePage {
 
       const requestBtn = this.requestApprovalButton();
       await requestBtn.waitFor({ state: 'visible', timeout: 30_000 });
+      await expect(requestBtn).toBeEnabled({ timeout: 15_000 });
       await requestBtn.scrollIntoViewIfNeeded();
 
       const rpc = this.page
@@ -414,12 +459,17 @@ export class SalesBlanketOrderComponent extends BasePage {
         )
         .catch(() => null);
 
-      await requestBtn.click();
+      if (await this.dismissDuplicateBlanketModal()) {
+        await this.editAndRefreshForDuplicate(attempt + 1);
+        continue;
+      }
+
+      await requestBtn.click({ timeout: 30_000 });
       await rpc;
       await this.waitForPageLoad();
 
       if (await this.dismissDuplicateBlanketModal()) {
-        await this.editAndRefreshDates(attempt + 1);
+        await this.editAndRefreshForDuplicate(attempt + 1);
         continue;
       }
 
@@ -430,6 +480,11 @@ export class SalesBlanketOrderComponent extends BasePage {
         return;
       }
     }
+
+    throw new Error(
+      'Request For Approval gagal: data duplikat (Customer + Start Date + End Date + Product). ' +
+        'Ubah tanggal/produk atau hapus BO lama di server.'
+    );
   }
 
   async approve(): Promise<void> {
@@ -484,4 +539,37 @@ export class SalesBlanketOrderComponent extends BasePage {
       )
       .not.toBe('');
   }
+
+  async setStartDate(date: string, endDate?: string): Promise<void> {
+    const startField = this.page.getByRole('textbox', { name: /^start date$/i }).first();
+    await startField.waitFor({ state: 'visible', timeout: 30_000 });
+    await startField.scrollIntoViewIfNeeded();
+    await startField.click();
+    await startField.fill(date);
+    await startField.press('Tab').catch(() => undefined);
+
+    if (endDate) {
+      const endField = this.page.getByRole('textbox', { name: /^end date$/i }).first();
+      await endField.click();
+      await endField.fill(endDate);
+      await endField.press('Tab').catch(() => undefined);
+    }
+
+    await this.page.keyboard.press('Escape').catch(() => undefined);
+    await this.interaction.dismissBlockingDialogs();
+  }
+
+  /** @deprecated Use setStartDate — blanket order has Start/End Date, not validity_date */
+  async setOrderDate(date: string): Promise<void> {
+    await this.setStartDate(date);
+  }
+  
+  async expectDuplicateValidationModal(): Promise<void> {
+    const modal = this.page.locator('.modal.show').filter({
+      hasText: /matches existing blanket order|validation error/i,
+    });
+    await expect(modal).toBeVisible({ timeout: 15_000 });
+    await expect(this.page).not.toHaveURL(/id=\d+/);   // record TIDAK tersimpan
+  }
+  
 }

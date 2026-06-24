@@ -31,8 +31,8 @@ test.describe('Module | Sales — Create Blanket Order', () => {
 
     await salesBlanketOrder.navigateToBlanketOrders(listPath);
     await salesBlanketOrder.clickCreate();
-
     await salesBlanketOrder.selectCustomer(customerSearch, customerName);
+    await salesBlanketOrder.applyUniqueDates();
     await salesBlanketOrder.addProductLine(productSearch, productName, quantity);
 
     await salesBlanketOrder.save();
@@ -44,4 +44,6 @@ test.describe('Module | Sales — Create Blanket Order', () => {
     await salesBlanketOrder.approve();
     await salesBlanketOrder.expectBlanketOrderApproved();
   });
+
+
 });
