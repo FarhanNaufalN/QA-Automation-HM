@@ -1,0 +1,35 @@
+{
+  "name": "qa-automation-framework",
+  "version": "1.0.0",
+  "description": "Independent QA Automation Framework for multi-project ERP testing",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "test:projectA": "cross-env PROJECT=projectA playwright test",
+    "test:projectB": "cross-env PROJECT=projectB playwright test",
+    "test:projectC": "cross-env PROJECT=projectC playwright test",
+    "test:smoke": "playwright test tests/smoke",
+    "test:smoke:projectA": "cross-env PROJECT=projectA playwright test tests/smoke",
+    "test:regression": "playwright test tests/regression",
+    "test:modules": "playwright test tests/modules --project=regression-sales --project=regression-inventory --project=regression-purchasing --project=regression-finance",
+    "test:modules:sales": "playwright test tests/modules/sales --project=regression-sales",
+    "test:modules:sales:erabudi": "cross-env PROJECT=erabudi playwright test tests/modules/sales --project=regression-sales",
+    "test:modules:sales:score22": "cross-env PROJECT=score22 playwright test tests/modules/sales --project=regression-sales",
+    "test:modules:inventory": "playwright test tests/modules/inventory --project=regression-inventory",
+    "test:modules:purchasing": "playwright test tests/modules/purchasing --project=regression-purchasing",
+    "test:modules:finance": "playwright test tests/modules/finance --project=regression-finance",
+    "test:regression:sales": "cross-env PROJECT=projectA playwright test tests/modules/sales --project=regression-sales",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui",
+    "test:debug": "playwright test --debug",
+    "report": "playwright show-report reports/html",
+    "codegen": "playwright codegen"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0",
+    "@types/node": "^22.15.0",
+    "cross-env": "^7.0.3",
+    "dotenv": "^16.5.0",
+    "typescript": "^5.8.0"
+  }
+}

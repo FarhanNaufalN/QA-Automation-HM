@@ -1,0 +1,15 @@
+node_modules/
+dist/
+reports/html/
+reports/test-results/
+reports/blob-report/
+test-results/
+playwright-report/
+playwright/.cache/
+.env
+configs/projectA.env
+configs/erabudi.env
+configs/score22.env
+configs/learning-time.env
+*.log
+.DS_Store
