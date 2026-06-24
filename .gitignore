@@ -7,9 +7,7 @@ test-results/
 playwright-report/
 playwright/.cache/
 .env
-configs/projectA.env
-configs/erabudi.env
 configs/score22.env
-configs/learning-time.env
+configs/teazie.env
 *.log
 .DS_Store

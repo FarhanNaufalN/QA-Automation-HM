@@ -18,11 +18,8 @@ export interface ProjectFixture {
 }
 
 const PROJECT_MAP: Record<string, ProjectFixture> = {
-  projectA: hashWarehouseFixture,
-  projectB: hashFinanceFixture,
-  projectC: hashRetailFixture,
-  erabudi: hashWarehouseFixture,
   score22: hashWarehouseFixture,
+  teazie: hashWarehouseFixture,
   'hash-warehouse': hashWarehouseFixture,
   'hash-finance': hashFinanceFixture,
   'hash-retail': hashRetailFixture,

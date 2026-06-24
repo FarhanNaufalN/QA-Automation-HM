@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
+import { log } from './logger';
 
 export interface ProjectConfig {
   project: string;
@@ -42,11 +43,14 @@ export function loadProjectEnv(): void {
 
   dotenv.config({ path: envPath, override: true });
   process.env.PROJECT = project;
+
+  const loaded = getConfig();
+  log('Config', `project=${project} url=${loaded.baseUrl} db=${loaded.database}`);
 }
 
 export function getConfig(): ProjectConfig {
   const rawBaseUrl = process.env.BASE_URL ?? 'http://localhost:3000';
-  const baseUrl = rawBaseUrl.replace(/\/web\/login\/?$/, '');
+  const baseUrl = normalizeBaseUrl(rawBaseUrl);
 
   return {
     project: process.env.PROJECT ?? DEFAULT_PROJECT,
@@ -64,4 +68,12 @@ export function getConfig(): ProjectConfig {
     timeout: Number(process.env.TIMEOUT ?? 30000),
     headless: process.env.HEADLESS !== 'false',
   };
+}
+
+function normalizeBaseUrl(raw: string): string {
+  let url = raw.trim().replace(/\/web\/login\/?$/, '');
+  if (!/^https?:\/\//i.test(url)) {
+    url = `https://${url}`;
+  }
+  return url.replace(/\/$/, '');
 }
