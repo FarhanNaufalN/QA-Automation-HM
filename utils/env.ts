@@ -16,6 +16,7 @@ export interface ProjectConfig {
   productQty: string;
   warehouseSearch: string;
   warehouseName: string;
+  blanketOrderPath: string;
   timeout: number;
   headless: boolean;
 }
@@ -65,6 +66,7 @@ export function getConfig(): ProjectConfig {
     productQty: process.env.PRODUCT_QTY ?? '',
     warehouseSearch: process.env.WAREHOUSE_SEARCH ?? '',
     warehouseName: process.env.WAREHOUSE_NAME ?? '',
+    blanketOrderPath: process.env.BLANKET_ORDER_PATH ?? '',
     timeout: Number(process.env.TIMEOUT ?? 30000),
     headless: process.env.HEADLESS !== 'false',
   };

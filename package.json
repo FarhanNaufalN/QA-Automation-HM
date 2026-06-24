@@ -14,6 +14,7 @@
     "test:modules": "playwright test tests/modules --project=regression-sales --project=regression-inventory --project=regression-purchasing --project=regression-finance",
     "test:modules:sales": "playwright test tests/modules/sales --project=regression-sales",
     "test:modules:sales:teazie": "cross-env PROJECT=teazie playwright test tests/modules/sales --project=regression-sales",
+    "test:modules:sales:teazie:blanket": "cross-env PROJECT=teazie playwright test tests/modules/sales/create-blanket-order.spec.ts --project=regression-sales",
     "test:modules:sales:score22": "cross-env PROJECT=score22 playwright test tests/modules/sales --project=regression-sales",
     "test:modules:inventory": "playwright test tests/modules/inventory --project=regression-inventory",
     "test:modules:purchasing": "playwright test tests/modules/purchasing --project=regression-purchasing",

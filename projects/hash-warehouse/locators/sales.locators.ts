@@ -1,7 +1,7 @@
-import type { SalesQuotationLocators } from '../../../pages';
+import type { SalesQuotationLocators, SalesBlanketOrderLocators } from '../../../pages';
 
 /**
- * Layer 2 — Hash Warehouse / Learning Time sales selectors.
+ * Layer 2 — Hash Warehouse sales selectors.
  */
 export const warehouseSalesLocators = {
   quotation: {
@@ -18,4 +18,16 @@ export const warehouseSalesLocators = {
     waitingApprovalStatus: /waiting for sale order approval/i,
     approvedStatus: /quotation approved/i,
   } satisfies SalesQuotationLocators,
+
+  blanketOrder: {
+    listPath:
+      '/web#action=1573&model=saleblanket.saleblanket&view_type=list&menu_id=1159',
+    createButton: /create/i,
+    customerField: /customer/i,
+    orderLinesTab: /order line/i,
+    addLineButton: /^add a line$/i,
+    saveButton: /save/i,
+    requestApprovalButton: /request for approval/i,
+    approveButton: /^approve$/i,
+  } satisfies SalesBlanketOrderLocators,
 };

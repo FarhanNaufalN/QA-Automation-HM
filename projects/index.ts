@@ -2,8 +2,10 @@ import { Page } from '@playwright/test';
 import {
   LoginComponent,
   SalesQuotationComponent,
+  SalesBlanketOrderComponent,
   type LoginLocators,
   type SalesQuotationLocators,
+  type SalesBlanketOrderLocators,
 } from '../pages';
 import { hashWarehouseFixture } from './hash-warehouse';
 import { hashFinanceFixture } from './hash-finance';
@@ -13,8 +15,10 @@ export interface ProjectFixture {
   name: string;
   createLogin: (page: Page) => LoginComponent;
   createSalesQuotation?: (page: Page) => SalesQuotationComponent;
+  createSalesBlanketOrder?: (page: Page) => SalesBlanketOrderComponent;
   locators: LoginLocators;
   salesLocators?: SalesQuotationLocators;
+  blanketOrderLocators?: SalesBlanketOrderLocators;
 }
 
 const PROJECT_MAP: Record<string, ProjectFixture> = {

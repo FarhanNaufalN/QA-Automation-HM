@@ -4,3 +4,7 @@ export {
   SalesQuotationComponent,
   type SalesQuotationLocators,
 } from './sales-quotation.component';
+export {
+  SalesBlanketOrderComponent,
+  type SalesBlanketOrderLocators,
+} from './sales-blanket-order.component';
