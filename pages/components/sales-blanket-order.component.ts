@@ -1,6 +1,5 @@
 import { Page, expect, type Locator } from '@playwright/test';
 import { BasePage } from '../base.page';
-import { getConfig } from '../../utils/env';
 
 export interface SalesBlanketOrderLocators {
   listPath: string;
@@ -64,25 +63,30 @@ export class SalesBlanketOrderComponent extends BasePage {
 
   async navigateToBlanketOrders(listPath?: string): Promise<void> {
     const path = listPath ?? this.locators.listPath;
-    const { baseUrl } = getConfig();
-    const target = path.startsWith('http') ? path : `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
 
-    await this.page.goto(target, { waitUntil: 'domcontentloaded' });
-    await this.page.waitForTimeout(2_000);
+    await this.interaction.dismissBlockingDialogs();
+    await this.page.goto(path, { waitUntil: 'domcontentloaded' });
+    await this.page.waitForTimeout(6_000);
+    await this.interaction.dismissBlockingDialogs();
 
-    if (!this.page.url().includes('saleblanket.saleblanket')) {
+    if (!(await this.createButtonLocator().isVisible().catch(() => false))) {
+      await this.interaction.switchTopModule(/sales/i);
+      await this.page.waitForTimeout(2_000);
+      await this.page.goto(path, { waitUntil: 'domcontentloaded' });
+      await this.page.waitForTimeout(6_000);
+    }
+
+    if (!(await this.createButtonLocator().isVisible().catch(() => false))) {
       try {
         await this.interaction.openSidebarMenu(/blanket orders/i);
+        await this.page.waitForTimeout(4_000);
       } catch {
-        await this.page.goto(target, { waitUntil: 'networkidle' }).catch(() => undefined);
+        // no-op — final wait below will surface a clear error
       }
     }
 
-    await this.page.waitForURL(/saleblanket\.saleblanket/, { timeout: 90_000 });
+    await this.createButtonLocator().waitFor({ state: 'visible', timeout: 90_000 });
     await this.interaction.waitForListReady();
-    await this.interaction.dismissBlockingDialogs();
-
-    await this.createButtonLocator().waitFor({ state: 'visible', timeout: 60_000 });
   }
 
   private createButtonLocator(): Locator {
@@ -151,6 +155,82 @@ export class SalesBlanketOrderComponent extends BasePage {
     await this.interaction.clickTab(this.locators.orderLinesTab);
   }
 
+  private orderLineRowLocator(): Locator {
+    return this.page
+      .locator('[name="order_line_ids"] .o_field_one2many tbody tr, .o_field_one2many tbody tr')
+      .filter({ has: this.page.getByRole('button', { name: /delete row/i }) })
+      .last();
+  }
+
+  private async orderLineAnalyticGroupField(): Promise<Locator> {
+    const lineRow = this.orderLineRowLocator();
+    const taggedField = lineRow.locator(
+      '[data-uniq="input_field_orderline.orderline_analytic_tag_ids"], [name="analytic_tag_ids"] input'
+    );
+    if (await taggedField.count()) {
+      return taggedField.first();
+    }
+
+    const namedField = lineRow.locator('[name="analytic_group_id"] input, [name*="analytic"] input').first();
+    if (await namedField.count()) {
+      return namedField;
+    }
+
+    const table = this.page.locator('[name="order_line_ids"] table, .o_field_one2many table').first();
+    const headers = table.locator('thead th');
+    const headerCount = await headers.count();
+
+    for (let i = 0; i < headerCount; i++) {
+      const text = ((await headers.nth(i).innerText().catch(() => '')) ?? '').trim();
+      if (/analytic group/i.test(text)) {
+        return lineRow.locator('td').nth(i).locator('input, textarea').first();
+      }
+    }
+
+    return lineRow.locator('input, textarea').last();
+  }
+
+  private analyticGroupCell(field: Locator): Locator {
+    return field.locator('xpath=ancestor::td[1]');
+  }
+
+  private async hasAnalyticGroupSelected(field: Locator): Promise<boolean> {
+    const cell = this.analyticGroupCell(field);
+    if (await cell.locator('.o_tag, .badge, .o_badge').count()) {
+      return true;
+    }
+
+    const text = ((await cell.innerText().catch(() => '')) ?? '').replace(/\s+/g, ' ').trim();
+    return text.length > 0 && !/^analytic group$/i.test(text);
+  }
+
+  private async fillAnalyticGroupOnLine(): Promise<void> {
+    const lineRow = this.orderLineRowLocator();
+    await lineRow.scrollIntoViewIfNeeded();
+
+    const analyticField = await this.orderLineAnalyticGroupField();
+    await analyticField.waitFor({ state: 'visible', timeout: 30_000 });
+
+    if (await this.hasAnalyticGroupSelected(analyticField)) {
+      return;
+    }
+
+    await analyticField.click();
+    const dropdownBtn = this.analyticGroupCell(analyticField).locator('button').first();
+    if (await dropdownBtn.count()) {
+      await dropdownBtn.click().catch(() => undefined);
+    }
+
+    await this.page
+      .waitForResponse((response) => response.url().includes('call_kw') && response.ok())
+      .catch(() => null);
+
+    await this.interaction.selectFirstOdooAutocompleteOption();
+    await expect.poll(() => this.hasAnalyticGroupSelected(analyticField), { timeout: 15_000 }).toBe(true);
+    await analyticField.press('Tab').catch(() => undefined);
+    await this.interaction.dismissBlockingDialogs();
+  }
+
   async addProductLine(
     productSearch: string,
     productOption: string | RegExp,
@@ -161,31 +241,109 @@ export class SalesBlanketOrderComponent extends BasePage {
     const addButton = this.page.getByRole('button', { name: this.locators.addLineButton });
     await addButton.scrollIntoViewIfNeeded();
     await addButton.click();
+    await this.page.waitForTimeout(1_000);
 
-    const row = this.page.locator('.o_field_one2many tbody tr').last();
-    const productField = row.locator('input.ui-autocomplete-input').first();
+    const lineRow = this.orderLineRowLocator();
+    const productField = lineRow
+      .locator('input.ui-autocomplete-input, [name="product_id"] input')
+      .first();
 
     await productField.waitFor({ state: 'visible', timeout: 30_000 });
     await this.fillMany2One(productField, productSearch, productOption);
 
-    const qtyField = row.locator('[name="quantity"] input, input[name="quantity"]').first();
-    await qtyField.waitFor({ state: 'visible' });
-    await qtyField.click();
-    await qtyField.fill(quantity);
+    const qtyField = lineRow.locator('input[name="quantity"]').first();
+    if (await qtyField.count()) {
+      const currentQty = (await qtyField.inputValue()).trim();
+      if (!currentQty || currentQty === '0' || currentQty === '0.00') {
+        await qtyField.click();
+        await qtyField.fill(quantity);
+      }
+      await qtyField.press('Tab').catch(() => undefined);
+    }
+
+    await this.fillAnalyticGroupOnLine();
+    await this.interaction.dismissBlockingDialogs();
+  }
+
+  private formatUsDate(date: Date): string {
+    return `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}/${date.getFullYear()}`;
+  }
+
+  private async isNewBlanketOrder(): Promise<boolean> {
+    if (/id=&|id=false/i.test(this.page.url())) {
+      return true;
+    }
+    return this.page.getByRole('heading', { name: /^new$/i }).isVisible().catch(() => false);
+  }
+
+  private async fillUniqueDateRange(attempt = 0): Promise<void> {
+    const offset = 50 + Math.floor(Math.random() * 250) + attempt * 17;
+    const start = new Date();
+    start.setDate(start.getDate() + offset);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 30);
+
+    const startDate = this.page.getByRole('textbox', { name: /^start date$/i }).first();
+    const endDate = this.page.getByRole('textbox', { name: /^end date$/i }).first();
+
+    await startDate.click();
+    await startDate.fill(this.formatUsDate(start));
+    await startDate.press('Tab').catch(() => undefined);
+
+    if (await endDate.count()) {
+      await endDate.click();
+      await endDate.fill(this.formatUsDate(end));
+      await endDate.press('Tab').catch(() => undefined);
+    }
+
+    await this.interaction.dismissBlockingDialogs();
+  }
+
+  private async ensureMandatoryFields(): Promise<void> {
+    if (await this.isNewBlanketOrder()) {
+      await this.fillUniqueDateRange();
+      return;
+    }
+
+    const startDate = this.page.getByRole('textbox', { name: /^start date$/i }).first();
+    if (await startDate.count()) {
+      const val = (await startDate.inputValue()).trim();
+      if (!val) {
+        await this.fillUniqueDateRange();
+      }
+    }
+  }
+
+  private async editAndRefreshDates(attempt = 1): Promise<void> {
+    await this.interaction.dismissBlockingDialogs();
+
+    const saveButton = this.page.locator('[data-uniq="btn_saleblanket.saleblanket_save"]');
+    const inEditMode = await saveButton.isVisible().catch(() => false);
+
+    if (!inEditMode) {
+      await this.page.getByRole('button', { name: /edit/i }).first().click();
+      await this.waitForForm();
+    }
+
+    await this.fillUniqueDateRange(attempt);
+    await this.save();
+    await this.expectBlanketOrderSaved();
   }
 
   async save(): Promise<void> {
+    await this.ensureMandatoryFields();
+    await this.interaction.dismissBlockingDialogs();
     await this.page
-      .waitForResponse(
-        (response) => response.url().includes('call_kw') && response.request().method() === 'POST'
-      )
-      .catch(() => null);
+      .locator('.blockUI.blockOverlay')
+      .waitFor({ state: 'hidden', timeout: 30_000 })
+      .catch(() => undefined);
 
     const saveButton = this.page
       .locator('[data-uniq="btn_saleblanket.saleblanket_save"]')
       .or(this.page.getByRole('button', { name: this.locators.saveButton }))
       .first();
 
+    await saveButton.scrollIntoViewIfNeeded();
     await saveButton.click();
     await this.waitForPageLoad();
     await this.interaction.dismissBlockingDialogs();
@@ -203,35 +361,127 @@ export class SalesBlanketOrderComponent extends BasePage {
     }
   }
 
+  private async isWaitingForApproval(): Promise<boolean> {
+    const waiting = this.page
+      .getByRole('radio', { name: /waiting for approval/i })
+      .or(this.page.locator('[data-value="to_approve"][aria-current="step"]'))
+      .first();
+    return (await waiting.count()) > 0 && (await waiting.isChecked().catch(() => false));
+  }
+
+  private async dismissDuplicateBlanketModal(): Promise<boolean> {
+    const validationModal = this.page.locator('.modal.show').filter({
+      hasText: /validation error|matches existing blanket orders/i,
+    });
+
+    if (!(await validationModal.isVisible().catch(() => false))) {
+      return false;
+    }
+
+    await validationModal.getByRole('button', { name: /^ok$/i }).first().click();
+    await validationModal.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
+    return true;
+  }
+
+  private requestApprovalButton(): Locator {
+    return this.page
+      .locator('[data-uniq="btn_header_saleblanket.saleblanket_action_request_for_approval_bo"]')
+      .or(this.page.getByRole('button', { name: this.locators.requestApprovalButton }))
+      .first();
+  }
+
   async requestForApproval(): Promise<void> {
-    await this.page
-      .getByRole('button', { name: this.locators.requestApprovalButton })
-      .first()
-      .click();
-    await this.waitForPageLoad();
-    await this.confirmDialogIfPresent();
-    await this.interaction.dismissBlockingDialogs();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (await this.isWaitingForApproval()) {
+        return;
+      }
+
+      if (await this.dismissDuplicateBlanketModal()) {
+        await this.editAndRefreshDates(attempt + 1);
+        continue;
+      }
+
+      await this.interaction.dismissBlockingDialogs();
+
+      const requestBtn = this.requestApprovalButton();
+      await requestBtn.waitFor({ state: 'visible', timeout: 30_000 });
+      await requestBtn.scrollIntoViewIfNeeded();
+
+      const rpc = this.page
+        .waitForResponse(
+          (response) => response.url().includes('call_kw') && response.request().method() === 'POST',
+          { timeout: 60_000 }
+        )
+        .catch(() => null);
+
+      await requestBtn.click();
+      await rpc;
+      await this.waitForPageLoad();
+
+      if (await this.dismissDuplicateBlanketModal()) {
+        await this.editAndRefreshDates(attempt + 1);
+        continue;
+      }
+
+      await this.confirmDialogIfPresent();
+      await this.interaction.dismissBlockingDialogs();
+
+      if (await this.isWaitingForApproval()) {
+        return;
+      }
+    }
   }
 
   async approve(): Promise<void> {
-    await this.page.getByRole('button', { name: this.locators.approveButton }).first().click();
+    const approveBtn = this.page.getByRole('button', { name: this.locators.approveButton }).first();
+    await approveBtn.waitFor({ state: 'visible', timeout: 60_000 });
+
+    const saveResponse = this.page
+      .waitForResponse(
+        (response) => response.url().includes('call_kw') && response.request().method() === 'POST',
+        { timeout: 90_000 }
+      )
+      .catch(() => null);
+
+    await approveBtn.click();
+    await saveResponse;
     await this.waitForPageLoad();
     await this.confirmDialogIfPresent();
     await this.interaction.dismissBlockingDialogs();
   }
 
   async expectWaitingForApproval(): Promise<void> {
-    const step = this.page
-      .locator('.o_form_view button[data-value="waiting_for_approval"][aria-current="step"]')
-      .first();
-    await expect(step).toBeAttached({ timeout: 60_000 });
+    await expect
+      .poll(
+        async () => {
+          const waiting = this.page
+            .getByRole('radio', { name: /waiting for approval/i })
+            .or(this.page.locator('[data-value="to_approve"][aria-current="step"]'))
+            .first();
+          return (await waiting.count()) > 0 && (await waiting.isChecked());
+        },
+        { timeout: 60_000 }
+      )
+      .toBe(true);
   }
 
   async expectBlanketOrderApproved(): Promise<void> {
-    const form = this.page.locator('.o_form_view');
-    await expect(form.locator('button[data-value="waiting_for_approval"][aria-current="step"]')).toHaveCount(
-      0,
-      { timeout: 60_000 }
-    );
+    await expect
+      .poll(
+        async () => {
+          const running = this.page.getByRole('radio', { name: /^running$/i });
+          const confirmed = this.page.getByRole('radio', { name: /^confirmed$/i });
+
+          if ((await running.count()) && (await running.isChecked())) {
+            return 'running';
+          }
+          if ((await confirmed.count()) && (await confirmed.isChecked())) {
+            return 'confirmed';
+          }
+          return '';
+        },
+        { timeout: 120_000 }
+      )
+      .not.toBe('');
   }
 }

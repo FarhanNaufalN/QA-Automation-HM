@@ -14,6 +14,8 @@ const defaults = loadTestData<SalesBlanketOrderTestData>('sales-blanket-order.js
  * Flow: login → Blanket Orders → Create → fill → Save → Request Approval → Approve
  */
 test.describe('Module | Sales — Create Blanket Order', () => {
+  test.setTimeout(300_000);
+
   test.beforeEach(async ({ authenticatedPage }) => {});
 
   test('should create blanket order, save, request approval, and approve', async ({

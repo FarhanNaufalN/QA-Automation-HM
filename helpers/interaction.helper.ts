@@ -18,6 +18,18 @@ export class InteractionHelper {
         return;
       }
 
+      const discardWarning = modal.getByText(/record has been modified|changes will be discarded/i);
+      if (await discardWarning.count()) {
+        const cancel = modal.getByRole('button', { name: /^cancel$/i });
+        if (await cancel.count()) {
+          await cancel.first().click();
+        } else {
+          await this.page.keyboard.press('Escape');
+        }
+        await modal.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => undefined);
+        continue;
+      }
+
       const ok = modal.getByRole('button', { name: /^ok$/i });
       if (await ok.count()) {
         await ok.first().click();
@@ -118,6 +130,23 @@ export class InteractionHelper {
     await app.click({ timeout: 15_000 });
   }
 
+  /** HashMicro top navbar module switcher (CRM → Sales, etc.). */
+  async switchTopModule(moduleName: string | RegExp): Promise<void> {
+    const pattern =
+      typeof moduleName === 'string' ? new RegExp(`^${moduleName}$`, 'i') : moduleName;
+    const toggle = this.page.locator('p').filter({ hasText: /^(CRM|Sales|Inventory|Purchasing)$/i }).first();
+
+    if (await toggle.count()) {
+      const current = ((await toggle.textContent()) ?? '').trim();
+      if (pattern.test(current)) {
+        return;
+      }
+      await toggle.click();
+      await this.page.getByRole('menuitem', { name: pattern }).first().click();
+      await this.page.waitForTimeout(2_000);
+    }
+  }
+
   /** Expand Odoo left sidebar if collapsed. */
   async ensureSidebarOpen(): Promise<void> {
     const toggle = this.page.locator('.o_menu_toggle').first();
@@ -179,6 +208,16 @@ export class InteractionHelper {
       .locator('.ui-autocomplete li a, .ui-autocomplete li')
       .filter({ hasText: optionName })
       .filter({ visible: true })
+      .first();
+
+    await item.waitFor({ state: 'visible', timeout: 15_000 });
+    await item.click();
+  }
+
+  /** Pick the first visible Odoo autocomplete / dropdown option. */
+  async selectFirstOdooAutocompleteOption(): Promise<void> {
+    const item = this.page
+      .locator('.ui-autocomplete li:visible a, .ui-autocomplete li:visible')
       .first();
 
     await item.waitFor({ state: 'visible', timeout: 15_000 });
