@@ -3,9 +3,11 @@ import {
   LoginComponent,
   SalesQuotationComponent,
   SalesBlanketOrderComponent,
+  SalesDirectOrderComponent,
   type LoginLocators,
   type SalesQuotationLocators,
   type SalesBlanketOrderLocators,
+  type SalesDirectOrderLocators,
 } from '../pages';
 import { hashWarehouseFixture } from './hash-warehouse';
 import { hashFinanceFixture } from './hash-finance';
@@ -16,9 +18,11 @@ export interface ProjectFixture {
   createLogin: (page: Page) => LoginComponent;
   createSalesQuotation?: (page: Page) => SalesQuotationComponent;
   createSalesBlanketOrder?: (page: Page) => SalesBlanketOrderComponent;
+  createSalesDirectOrder?: (page: Page) => SalesDirectOrderComponent;
   locators: LoginLocators;
   salesLocators?: SalesQuotationLocators;
   blanketOrderLocators?: SalesBlanketOrderLocators;
+  directOrderLocators?: SalesDirectOrderLocators;
 }
 
 const PROJECT_MAP: Record<string, ProjectFixture> = {

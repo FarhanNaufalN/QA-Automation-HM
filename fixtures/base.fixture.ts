@@ -1,5 +1,5 @@
 import { test as base } from '@playwright/test';
-import { LoginComponent, DashboardComponent, SalesQuotationComponent, SalesBlanketOrderComponent } from '../pages';
+import { LoginComponent, DashboardComponent, SalesQuotationComponent, SalesBlanketOrderComponent, SalesDirectOrderComponent } from '../pages';
 import {
   CrudHelper,
   ApprovalHelper,
@@ -16,6 +16,7 @@ type FrameworkFixtures = {
   dashboard: DashboardComponent;
   salesQuotation: SalesQuotationComponent;
   salesBlanketOrder: SalesBlanketOrderComponent;
+  salesDirectOrder: SalesDirectOrderComponent;
   crud: CrudHelper;
   approval: ApprovalHelper;
   table: TableHelper;
@@ -43,6 +44,10 @@ export const test = base.extend<FrameworkFixtures>({
 
   salesBlanketOrder: async ({ page }, use) => {
     await use(new SalesBlanketOrderComponent(page));
+  },
+
+  salesDirectOrder: async ({ page }, use) => {
+    await use(new SalesDirectOrderComponent(page));
   },
 
   crud: async ({ page }, use) => {

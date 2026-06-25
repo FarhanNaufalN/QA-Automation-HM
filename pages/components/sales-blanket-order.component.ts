@@ -1,5 +1,6 @@
 import { Page, expect, type Locator } from '@playwright/test';
 import { BasePage } from '../base.page';
+import { toLiteralRegExp } from '../../utils/regex';
 
 export interface SalesBlanketOrderLocators {
   listPath: string;
@@ -43,7 +44,7 @@ export class SalesBlanketOrderComponent extends BasePage {
     optionName: string | RegExp
   ): Promise<void> {
     const pattern =
-      typeof optionName === 'string' ? new RegExp(optionName, 'i') : optionName;
+      typeof optionName === 'string' ? toLiteralRegExp(optionName) : optionName;
 
     await field.waitFor({ state: 'visible', timeout: 30_000 });
     const currentValue = (await field.inputValue({ timeout: 15_000 }).catch(() => '')).trim();

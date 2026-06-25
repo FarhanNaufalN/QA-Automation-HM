@@ -4,7 +4,9 @@ export {
   DashboardComponent,
   SalesQuotationComponent,
   SalesBlanketOrderComponent,
+  SalesDirectOrderComponent,
   type LoginLocators,
   type SalesQuotationLocators,
   type SalesBlanketOrderLocators,
+  type SalesDirectOrderLocators,
 } from './components';

@@ -16,7 +16,10 @@ export interface ProjectConfig {
   productQty: string;
   warehouseSearch: string;
   warehouseName: string;
+  journalSearch: string;
+  journalName: string;
   blanketOrderPath: string;
+  directSalesPath: string;
   timeout: number;
   headless: boolean;
 }
@@ -66,7 +69,10 @@ export function getConfig(): ProjectConfig {
     productQty: process.env.PRODUCT_QTY ?? '',
     warehouseSearch: process.env.WAREHOUSE_SEARCH ?? '',
     warehouseName: process.env.WAREHOUSE_NAME ?? '',
+    journalSearch: process.env.JOURNAL_SEARCH ?? '',
+    journalName: process.env.JOURNAL_NAME ?? '',
     blanketOrderPath: process.env.BLANKET_ORDER_PATH ?? '',
+    directSalesPath: process.env.DIRECT_SALES_PATH ?? '',
     timeout: Number(process.env.TIMEOUT ?? 30000),
     headless: process.env.HEADLESS !== 'false',
   };

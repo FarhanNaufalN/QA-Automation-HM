@@ -1,5 +1,6 @@
 import { Page, expect, type Locator } from '@playwright/test';
 import { BasePage } from '../base.page';
+import { toLiteralRegExp } from '../../utils/regex';
 
 export interface SalesQuotationLocators {
   salesModule: string | RegExp;
@@ -42,18 +43,51 @@ export class SalesQuotationComponent extends BasePage {
     super(page);
   }
 
-  private async fillMany2One(
+  protected async fillMany2One(
     field: Locator,
     searchText: string,
     optionName: string | RegExp
   ): Promise<void> {
     const pattern =
-      typeof optionName === 'string' ? new RegExp(optionName, 'i') : optionName;
+      typeof optionName === 'string' ? toLiteralRegExp(optionName) : optionName;
+
+    const productCode =
+      typeof optionName === 'string' ? optionName.match(/\[([^\]]+)\]/)?.[1] : undefined;
+
+    const isProductLike =
+      Boolean(productCode) ||
+      (typeof optionName === 'string' && /\[.+\]/.test(optionName));
+
+    /** Typing search text alone is not a linked many2one record. */
+    const isLinkedRecord = (value: string): boolean => {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return false;
+      }
+
+      if (productCode && trimmed.includes(`[${productCode}]`)) {
+        return true;
+      }
+
+      if (isProductLike) {
+        return false;
+      }
+
+      if (pattern.test(trimmed) && trimmed.length > searchText.trim().length + 2) {
+        return true;
+      }
+
+      if (typeof optionName === 'string' && trimmed === optionName.trim()) {
+        return true;
+      }
+
+      return false;
+    };
 
     await field.waitFor({ state: 'visible', timeout: 30_000 });
     const currentValue = (await field.inputValue({ timeout: 15_000 }).catch(() => '')).trim();
 
-    if (pattern.test(currentValue)) {
+    if (isLinkedRecord(currentValue)) {
       return;
     }
 
@@ -64,9 +98,47 @@ export class SalesQuotationComponent extends BasePage {
       .waitForResponse((response) => response.url().includes('call_kw') && response.ok())
       .catch(() => null);
 
-    await this.interaction.selectOdooAutocompleteOption(optionName);
+    await this.page
+      .locator('.ui-autocomplete-loading')
+      .first()
+      .waitFor({ state: 'detached', timeout: 15_000 })
+      .catch(() => undefined);
 
-    await expect(field).toHaveValue(pattern, { timeout: 15_000 });
+    await this.page
+      .locator('.ui-autocomplete:visible li')
+      .first()
+      .waitFor({ state: 'visible', timeout: 15_000 })
+      .catch(() => undefined);
+
+    try {
+      await this.interaction.selectOdooAutocompleteOption(optionName, searchText, field);
+    } catch (error) {
+      if (!productCode || productCode === searchText.trim()) {
+        throw error;
+      }
+
+      await field.fill(productCode);
+      await this.page
+        .waitForResponse((response) => response.url().includes('call_kw') && response.ok())
+        .catch(() => null);
+      await this.page
+        .locator('.ui-autocomplete:visible li')
+        .first()
+        .waitFor({ state: 'visible', timeout: 15_000 })
+        .catch(() => undefined);
+      await this.interaction.selectOdooAutocompleteOption(optionName, searchText, field);
+    }
+
+    const finalValue = (await field.inputValue({ timeout: 5_000 }).catch(() => '')).trim();
+    if (isLinkedRecord(finalValue)) {
+      await field.press('Tab').catch(() => undefined);
+      return;
+    }
+
+    await expect(async () => {
+      const value = (await field.inputValue()).trim();
+      expect(isLinkedRecord(value)).toBe(true);
+    }).toPass({ timeout: 15_000 });
   }
 
   async openSalesModule(): Promise<void> {
@@ -191,6 +263,83 @@ export class SalesQuotationComponent extends BasePage {
     await this.interaction.clickTab(this.locators.orderLinesTab);
   }
 
+  private productOptionLocator(bracketCode: string): Locator {
+    return this.page
+      .locator('.ui-autocomplete li:visible')
+      .filter({ hasText: toLiteralRegExp(`[${bracketCode}]`) })
+      .filter({ hasNotText: /search more|no search results/i })
+      .first();
+  }
+
+  private async waitForProductSearchRpc(): Promise<void> {
+    await this.page
+      .waitForResponse(
+        (response) => {
+          if (!response.url().includes('call_kw') || !response.ok()) {
+            return false;
+          }
+          const body = response.request().postData() ?? '';
+          return (
+            body.includes('product') &&
+            (body.includes('name_search') || body.includes('web_name_search'))
+          );
+        },
+        { timeout: 12_000 }
+      )
+      .catch(() => null);
+  }
+
+  private async selectProductFromAutocomplete(
+    field: Locator,
+    productSearch: string,
+    bracketCode: string,
+    productOption: string | RegExp
+  ): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await field.click();
+      await field.fill('');
+  
+      const searchResponse = this.waitForProductSearchRpc();
+  
+      if (attempt === 0) {
+        await field.fill(productSearch);
+      } else {
+        await field.pressSequentially(productSearch, { delay: 50 });
+      }
+  
+      await searchResponse;
+  
+      await this.page
+        .locator('.ui-autocomplete-loading')
+        .first()
+        .waitFor({ state: 'detached', timeout: 10_000 })
+        .catch(() => undefined);
+  
+      try {
+        const option = this.productOptionLocator(bracketCode);
+  
+        if (await option.isVisible({ timeout: 5_000 }).catch(() => false)) {
+          await option.click();
+        } else {
+          await this.interaction.selectOdooAutocompleteOption(productOption, productSearch, field);
+        }
+  
+        await expect
+          .poll(async () => (await field.inputValue().catch(() => '')).trim(), {
+            timeout: 15_000,
+          })
+          .toContain(`[${bracketCode}]`);
+  
+        await field.press('Tab').catch(() => undefined);
+        return;
+      } catch {
+        // retry search/selection
+      }
+    }
+  
+    throw new Error(`Failed to select product [${bracketCode}] from autocomplete`);
+  }
+
   async addProductLine(
     productSearch: string,
     productOption: string | RegExp,
@@ -202,14 +351,26 @@ export class SalesQuotationComponent extends BasePage {
     await addButton.scrollIntoViewIfNeeded();
     await addButton.click();
 
-    const productField = this.page
+    const lineRow = this.page
       .locator('.o_field_one2many tbody tr')
       .filter({ has: this.page.getByRole('button', { name: /delete row/i }) })
-      .locator('input.ui-autocomplete-input')
-      .first();
+      .last();
+
+    const productField = lineRow.locator('input.ui-autocomplete-input').first();
 
     await productField.waitFor({ state: 'visible', timeout: 30_000 });
-    await this.fillMany2One(productField, productSearch, productOption);
+
+    const bracketCode =
+      typeof productOption === 'string'
+        ? productOption.match(/\[([^\]]+)\]/)?.[1] ?? productSearch.trim()
+        : productSearch.trim();
+    
+    await this.selectProductFromAutocomplete(
+      productField,
+      productSearch,
+      bracketCode,
+      productOption
+    );
 
     const qtyField = this.page
       .locator('.o_field_one2many tbody tr')
@@ -260,12 +421,43 @@ export class SalesQuotationComponent extends BasePage {
     await this.confirmDialogIfPresent();
   }
 
+  async confirmOrder(): Promise<void> {
+    await this.interaction.dismissBlockingDialogs();
+  
+    const confirmButton = this.page
+      .locator('button[name="action_confirm"]')
+      .or(this.page.getByRole('button', { name: /^confirm$/i }))
+      .first();
+  
+    await confirmButton.scrollIntoViewIfNeeded();
+    await confirmButton.click();
+    await this.waitForPageLoad();
+    await this.confirmDialogIfPresent();
+  }
+  
+  async expectSalesOrderConfirmed(): Promise<void> {
+    const form = this.page.locator('.o_form_view').first();
+
+    await expect(
+      form
+        .getByRole('radio', { name: /^closed$/i, checked: true })
+        .or(form.getByRole('radio', { name: /^sale order$/i, checked: true }))
+        .or(form.locator('button[data-value="closed"][aria-current="step"]'))
+        .or(form.locator('button[data-value="sale"][aria-current="step"]'))
+        .first()
+    ).toBeAttached({ timeout: 15_000 });
+
+    await expect(form.locator('h1, .oe_title').first()).not.toHaveText(/^new$/i, {
+      timeout: 5_000,
+    });
+  }
+
   async expectWaitingForApproval(): Promise<void> {
     // Odoo statusbar uses `role="radio"` steps that can be visibility:hidden while still active.
     const step = this.page
       .locator('.o_form_view button[data-value="waiting_for_approval"][aria-current="step"]')
       .first();
-    await expect(step).toBeAttached({ timeout: 60_000 });
+    await expect(step).toBeAttached({ timeout: 15_000 });
   }
 
   async expectQuotationApproved(): Promise<void> {

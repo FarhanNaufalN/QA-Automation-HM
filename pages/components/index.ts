@@ -8,3 +8,7 @@ export {
   SalesBlanketOrderComponent,
   type SalesBlanketOrderLocators,
 } from './sales-blanket-order.component';
+export {
+  SalesDirectOrderComponent,
+  type SalesDirectOrderLocators,
+} from './sales-direct-order.component';

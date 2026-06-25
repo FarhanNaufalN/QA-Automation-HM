@@ -1,4 +1,6 @@
 import { Page, Locator } from '@playwright/test';
+import { getConfig } from '../utils/env';
+import { toLiteralRegExp } from '../utils/regex';
 
 /**
  * Role-based interactions — avoid hardcoded CSS selectors.
@@ -133,18 +135,118 @@ export class InteractionHelper {
   /** HashMicro top navbar module switcher (CRM → Sales, etc.). */
   async switchTopModule(moduleName: string | RegExp): Promise<void> {
     const pattern =
-      typeof moduleName === 'string' ? new RegExp(`^${moduleName}$`, 'i') : moduleName;
-    const toggle = this.page.locator('p').filter({ hasText: /^(CRM|Sales|Inventory|Purchasing)$/i }).first();
+      typeof moduleName === 'string'
+        ? new RegExp(`^${moduleName}$`, 'i')
+        : new RegExp(
+            `^${moduleName.source.replace(/^\^|\$/g, '')}$`,
+            moduleName.flags.replace(/g/g, '')
+          );
 
-    if (await toggle.count()) {
-      const current = ((await toggle.textContent()) ?? '').trim();
-      if (pattern.test(current)) {
-        return;
-      }
-      await toggle.click();
-      await this.page.getByRole('menuitem', { name: pattern }).first().click();
-      await this.page.waitForTimeout(2_000);
+    const toggle = this.page
+      .locator('p')
+      .filter({ hasText: /^(CRM|Sales|Inventory|Purchasing)$/i })
+      .first();
+
+    if (!(await toggle.count())) {
+      return;
     }
+
+    const current = ((await toggle.textContent()) ?? '').trim();
+    if (pattern.test(current)) {
+      return;
+    }
+
+    await toggle.click();
+    await this.page.waitForTimeout(500);
+
+    const navbar = this.page.locator('header, .o_main_navbar, nav').first();
+    const item = navbar.getByRole('menuitem', { name: pattern }).first();
+    await item.click({ timeout: 15_000 });
+    await this.page.waitForTimeout(2_000);
+  }
+
+  /** Fill missing or empty cids/bids from the current Odoo session URL. */
+  resolveOdooSessionPath(relativePath: string): string {
+    const currentUrl = this.page.url();
+    const sessionCids = decodeURIComponent(currentUrl.match(/cids=([^&]+)/)?.[1] ?? '');
+    const sessionBids = currentUrl.match(/bids=([^&]+)/)?.[1] ?? '';
+    let path = relativePath;
+
+    const needsCids =
+      sessionCids &&
+      (!path.includes('cids=') || /cids=(?:&|$)/.test(path));
+    if (needsCids) {
+      path = path.includes('cids=')
+        ? path.replace(/cids=[^&]*/, `cids=${sessionCids}`)
+        : path.replace('#', `#cids=${sessionCids}&`);
+    }
+
+    const needsBids =
+      sessionBids &&
+      (!path.includes('bids=') || /bids=(?:&|$)/.test(path));
+    if (needsBids) {
+      path = path.includes('bids=')
+        ? path.replace(/bids=[^&]*/, `bids=${sessionBids}`)
+        : path.replace('#', `#bids=${sessionBids}&`);
+    }
+
+    return path;
+  }
+
+  /** Navigate to an Odoo action URL (hash routing) reliably. */
+  async navigateToOdooAction(relativePath: string): Promise<void> {
+    await this.page.keyboard.press('Escape').catch(() => undefined);
+
+    const path = this.resolveOdooSessionPath(relativePath);
+    const { baseUrl } = getConfig();
+    const hash = path.includes('#') ? path.slice(path.indexOf('#') + 1) : path;
+    const url = `${baseUrl}/web#${hash}`;
+
+    const actionId = path.match(/action=(\d+)/)?.[1];
+    const model = decodeURIComponent(path.match(/model=([^&]+)/)?.[1] ?? '');
+    const targetPattern =
+      actionId && model
+        ? new RegExp(`action=${actionId}.*model=${model.replace('.', '\\.')}`)
+        : actionId
+          ? new RegExp(`action=${actionId}`)
+          : /\/web#/;
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      // Teazzitea often ignores the first hash navigation right after login.
+      await this.page.goto(url, { waitUntil: 'domcontentloaded' });
+      await this.page.waitForTimeout(1_500);
+      await this.page.goto(url, { waitUntil: 'domcontentloaded' });
+
+      try {
+        await this.page.waitForURL(targetPattern, { timeout: 25_000 });
+        await this.page.waitForTimeout(1_500);
+
+        const currentUrl = this.page.url();
+        const bouncedToHome =
+          /mail\.activity|action=5525|view_type=calendar/i.test(currentUrl) ||
+          (actionId !== undefined && !currentUrl.includes(`action=${actionId}`));
+
+        if (!bouncedToHome) {
+          break;
+        }
+      } catch {
+        // Retry with another double-goto cycle.
+      }
+
+      if (attempt === 4) {
+        throw new Error(`Failed to open Odoo action. Expected ${path}, got ${this.page.url()}`);
+      }
+
+      await this.page.waitForTimeout(1_500);
+    }
+
+    await this.page
+      .locator('.o_loading, .o_blockUI, .o_spinner')
+      .first()
+      .waitFor({ state: 'hidden', timeout: 30_000 })
+      .catch(() => undefined);
+
+    await this.dismissBlockingDialogs();
   }
 
   /** Expand Odoo left sidebar if collapsed. */
@@ -203,15 +305,89 @@ export class InteractionHelper {
   /**
    * Odoo many2one / ui-autocomplete dropdown item.
    */
-  async selectOdooAutocompleteOption(optionName: string | RegExp): Promise<void> {
-    const item = this.page
-      .locator('.ui-autocomplete li a, .ui-autocomplete li')
-      .filter({ hasText: optionName })
-      .filter({ visible: true })
+  async selectOdooAutocompleteOption(
+    optionName: string | RegExp,
+    searchText?: string,
+    field?: Locator
+  ): Promise<void> {
+    const patterns: RegExp[] = [];
+
+    if (typeof optionName === 'string') {
+      patterns.push(toLiteralRegExp(optionName));
+
+      const bracketFromName = optionName.match(/\[([^\]]+)\]/)?.[1];
+      const code = bracketFromName ?? optionName.trim();
+      if (code) {
+        patterns.push(toLiteralRegExp(`[${code}]`));
+      }
+
+      if (searchText?.trim()) {
+        patterns.push(toLiteralRegExp(`[${searchText.trim()}]`));
+      }
+    } else {
+      patterns.push(optionName);
+    }
+
+    await this.page
+      .locator('.ui-autocomplete-loading')
+      .first()
+      .waitFor({ state: 'detached', timeout: 15_000 })
+      .catch(() => undefined);
+
+    for (const pattern of patterns) {
+      const item = this.page
+        .locator('.ui-autocomplete li a, .ui-autocomplete li')
+        .filter({ hasText: pattern })
+        .filter({ visible: true })
+        .first();
+
+      if (await item.isVisible().catch(() => false)) {
+        await item.click();
+        return;
+      }
+    }
+
+    const firstItem = this.page
+      .locator('.ui-autocomplete:visible li')
+      .filter({ hasNotText: /search more/i })
       .first();
 
-    await item.waitFor({ state: 'visible', timeout: 15_000 });
-    await item.click();
+    if (await firstItem.isVisible().catch(() => false)) {
+      await firstItem.click();
+      return;
+    }
+
+    const targetField =
+      field ??
+      this.page.locator('input.ui-autocomplete-input:focus').first();
+
+    if (await targetField.count()) {
+      await targetField.click();
+      await targetField.press('ArrowDown');
+      await this.page
+        .locator('.ui-autocomplete:visible li')
+        .first()
+        .waitFor({ state: 'visible', timeout: 5_000 })
+        .catch(() => undefined);
+
+      for (const pattern of patterns) {
+        const item = this.page
+          .locator('.ui-autocomplete li a, .ui-autocomplete li')
+          .filter({ hasText: pattern })
+          .filter({ visible: true })
+          .first();
+
+        if (await item.isVisible().catch(() => false)) {
+          await item.click();
+          return;
+        }
+      }
+
+      await targetField.press('Enter');
+      return;
+    }
+
+    throw new Error(`No Odoo autocomplete option found for ${String(optionName)}`);
   }
 
   /** Pick the first visible Odoo autocomplete / dropdown option. */

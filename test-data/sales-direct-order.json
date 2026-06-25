@@ -1,0 +1,15 @@
+{
+  "customer": {
+    "search": "INTERGRAL",
+    "option": "INTERGRAL DATA PRIMA PT"
+  },
+  "product": {
+    "search": "PAV",
+    "option": "PAV-007"
+  },
+  "quantity": "1",
+  "journal": {
+    "search": "OCBC",
+    "option": "OCBC"
+  }
+}
