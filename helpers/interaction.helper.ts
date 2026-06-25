@@ -10,16 +10,24 @@ export class InteractionHelper {
 
   /** Close Odoo / ERP modals that block clicks (errors, list-view manager, etc.). */
   async dismissBlockingDialogs(): Promise<void> {
+    if (this.page.isClosed()) {
+      return;
+    }
+
     for (let attempt = 0; attempt < 5; attempt++) {
+      if (this.page.isClosed()) {
+        return;
+      }
+
       const alert = this.page.locator('.alert, [role="alert"]').filter({ visible: true }).first();
-      if (await alert.count()) {
+      if ((await alert.count().catch(() => 0)) > 0) {
         const closeAlert = alert.getByRole('button', { name: /^close$/i });
-        if (await closeAlert.count()) {
-          await closeAlert.first().click();
+        if ((await closeAlert.count().catch(() => 0)) > 0) {
+          await closeAlert.first().click().catch(() => undefined);
         } else {
           await this.page.keyboard.press('Escape').catch(() => undefined);
         }
-        await this.page.waitForTimeout(300);
+        await this.page.waitForTimeout(300).catch(() => undefined);
         continue;
       }
 
@@ -28,36 +36,36 @@ export class InteractionHelper {
         .filter({ visible: true })
         .first();
 
-      if (!(await modal.count())) {
+      if ((await modal.count().catch(() => 0)) === 0) {
         return;
       }
 
       const discardWarning = modal.getByText(/record has been modified|changes will be discarded/i);
-      if (await discardWarning.count()) {
+      if ((await discardWarning.count().catch(() => 0)) > 0) {
         const cancel = modal.getByRole('button', { name: /^cancel$/i });
-        if (await cancel.count()) {
-          await cancel.first().click();
+        if ((await cancel.count().catch(() => 0)) > 0) {
+          await cancel.first().click().catch(() => undefined);
         } else {
-          await this.page.keyboard.press('Escape');
+          await this.page.keyboard.press('Escape').catch(() => undefined);
         }
         await modal.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => undefined);
         continue;
       }
 
       const ok = modal.getByRole('button', { name: /^ok$/i });
-      if (await ok.count()) {
-        await ok.first().click();
+      if ((await ok.count().catch(() => 0)) > 0) {
+        await ok.first().click().catch(() => undefined);
       } else {
         const close = modal.getByRole('button', { name: /^close$/i });
-        if (await close.count()) {
-          await close.first().click();
+        if ((await close.count().catch(() => 0)) > 0) {
+          await close.first().click().catch(() => undefined);
         } else {
-          await this.page.keyboard.press('Escape');
+          await this.page.keyboard.press('Escape').catch(() => undefined);
         }
       }
 
       await modal.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => undefined);
-      await this.page.waitForTimeout(500);
+      await this.page.waitForTimeout(500).catch(() => undefined);
     }
   }
 

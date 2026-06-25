@@ -264,6 +264,17 @@ export class SalesQuotationComponent extends BasePage {
     return (await step.count().catch(() => 0)) > 0;
   }
 
+  private async isQuotation(): Promise<boolean> {
+    if (this.page.isClosed()) {
+      return false;
+    }
+
+    return this.activeForm()
+      .getByRole('radio', { name: /^quotation$/i })
+      .isChecked()
+      .catch(() => false);
+  }
+
   private customerFieldLocator(): Locator {
     const form = this.activeForm();
     return form
@@ -572,8 +583,14 @@ export class SalesQuotationComponent extends BasePage {
     await Promise.all([
       this.page
         .waitForResponse(
-          (response) =>
-            response.url().includes('call_kw') && response.request().method() === 'POST',
+          (response) => {
+            const body = response.request().postData() ?? '';
+            return (
+              response.url().includes('call_kw') &&
+              response.request().method() === 'POST' &&
+              /action_confirm|confirm/i.test(body)
+            );
+          },
           { timeout: 90_000 }
         )
         .catch(() => null),
@@ -584,7 +601,19 @@ export class SalesQuotationComponent extends BasePage {
     await this.confirmDialogIfPresent();
     await this.interaction.dismissBlockingDialogs();
 
-    await expect.poll(() => this.isSalesOrderConfirmed(), { timeout: 60_000 }).toBe(true);
+    const confirmed = await expect
+      .poll(() => this.isSalesOrderConfirmed(), { timeout: 60_000 })
+      .toBe(true)
+      .then(() => true)
+      .catch(() => false);
+
+    if (!confirmed) {
+      const stillConfirmable = await this.confirmOrderButton().isVisible().catch(() => false);
+      const quotation = await this.isQuotation();
+      throw new Error(
+        `Direct Sales confirm gagal: state tetap Quotation=${quotation}, confirmButtonVisible=${stillConfirmable}`
+      );
+    }
   }
 
   async expectSalesOrderConfirmed(): Promise<void> {
