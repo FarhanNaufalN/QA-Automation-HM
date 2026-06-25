@@ -211,19 +211,35 @@ export class SalesBlanketOrderComponent extends BasePage {
     return text.length > 0 && !/^analytic group$/i.test(text);
   }
 
-  private async selectAnalyticTagOption(field: Locator): Promise<boolean> {
-    await this.interaction.dismissBlockingDialogs();
-    await this.page.keyboard.press('Escape').catch(() => undefined);
+  private async cancelDiscardWarningIfPresent(): Promise<void> {
+    const modal = this.page.locator('.modal.show').filter({
+      hasText: /record has been modified|changes will be discarded/i,
+    });
+
+    if (await modal.isVisible().catch(() => false)) {
+      await modal.getByRole('button', { name: /^cancel$/i }).first().click();
+      await modal.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
+    }
+  }
+
+  private async selectAnalyticTagOption(
+    field: Locator,
+    searchText = 'Bali',
+    optionName: string | RegExp = /Bali Branch/i
+  ): Promise<boolean> {
+    await this.cancelDiscardWarningIfPresent();
 
     if (!(await field.isEnabled().catch(() => false))) {
       return false;
     }
 
+    await field.scrollIntoViewIfNeeded();
     await field.click();
-    const dropdownBtn = this.analyticGroupCell(field).locator('button').first();
-    if (await dropdownBtn.count()) {
-      await dropdownBtn.click().catch(() => undefined);
-    }
+    await field.fill(searchText);
+
+    await this.page
+      .waitForResponse((r) => r.url().includes('call_kw') && r.ok(), { timeout: 10_000 })
+      .catch(() => null);
 
     await this.page
       .locator('.ui-autocomplete-loading')
@@ -231,13 +247,17 @@ export class SalesBlanketOrderComponent extends BasePage {
       .waitFor({ state: 'detached', timeout: 10_000 })
       .catch(() => undefined);
 
-    const tagOption = this.page
-      .locator('.ui-autocomplete.ui-front li:visible, .ui-autocomplete.ui-front li a:visible')
-      .filter({ hasNotText: /search more|start typing/i })
+    const option = this.page
+      .locator('.ui-autocomplete li:visible, .ui-autocomplete li a:visible')
+      .filter({ hasText: optionName })
+      .filter({ hasNotText: /search more|start typing|no results/i })
       .first();
 
-    await tagOption.waitFor({ state: 'visible', timeout: 15_000 });
-    await tagOption.click();
+    if (!(await option.isVisible({ timeout: 10_000 }).catch(() => false))) {
+      return false;
+    }
+
+    await option.click();
     return true;
   }
 
@@ -261,9 +281,6 @@ export class SalesBlanketOrderComponent extends BasePage {
   }
 
   private async fillAnalyticGroupOnLine(): Promise<void> {
-    await this.interaction.dismissBlockingDialogs();
-    await this.page.keyboard.press('Escape').catch(() => undefined);
-
     const lineRow = this.orderLineRowLocator();
     await lineRow.scrollIntoViewIfNeeded();
 
@@ -277,9 +294,7 @@ export class SalesBlanketOrderComponent extends BasePage {
     if (await analyticField.isEnabled().catch(() => false)) {
       const filled = await this.selectAnalyticTagOption(analyticField);
       if (filled) {
-        await expect.poll(() => this.hasAnalyticGroupSelected(analyticField), { timeout: 15_000 }).toBe(
-          true
-        );
+        await expect.poll(() => this.hasAnalyticGroupSelected(analyticField), { timeout: 15_000 }).toBe(true);
         await analyticField.press('Tab').catch(() => undefined);
         return;
       }
