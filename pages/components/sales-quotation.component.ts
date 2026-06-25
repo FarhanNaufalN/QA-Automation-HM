@@ -443,6 +443,17 @@ export class SalesQuotationComponent extends BasePage {
     await qtyField.waitFor({ state: 'visible' });
     await qtyField.click();
     await qtyField.fill(quantity);
+    await qtyField.press('Tab').catch(() => undefined);
+
+    const selectedProduct = lineRow
+      .locator('[name="product_id"] input, td[name="product_id"] input, input.ui-autocomplete-input')
+      .first();
+
+    await expect
+      .poll(async () => (await selectedProduct.inputValue().catch(() => '')).trim(), {
+        timeout: 15_000,
+      })
+      .toContain(`[${bracketCode}]`);
   }
 
   async save(): Promise<void> {
@@ -500,10 +511,21 @@ export class SalesQuotationComponent extends BasePage {
 
   protected async applyPendingOrderLinesIfNeeded(): Promise<void> {
     const form = this.activeForm();
-    const applyButton = form.getByRole('button', { name: /^apply$/i }).filter({ visible: true }).first();
+    
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const applyButton = form
+        .getByRole('button', { name: /^apply$/i })
+        .filter({ visible: true })
+        .first();
 
-    while (await applyButton.isVisible().catch(() => false)) {
-      await applyButton.click();
+      if (!(await applyButton.isVisible().catch(() => false))) {
+        return;
+      }
+      if (!(await applyButton.isEnabled().catch(() => false))) {
+        return;
+      }
+
+      await applyButton.click({ timeout: 5_000 });
       await this.page
         .locator('.o_loading, .o_blockUI')
         .first()

@@ -544,31 +544,18 @@ export class SalesBlanketOrderComponent extends BasePage {
       return;
     }
 
-    for (let attempt = 0; attempt < 5; attempt++) {
-      if (await this.isWaitingForApproval()) {
-        return;
-      }
+    if (await this.dismissDuplicateBlanketModal()) {
+      await this.editAndRefreshForDuplicate(1);
+    }
 
-      if (await this.dismissDuplicateBlanketModal()) {
-        await this.editAndRefreshForDuplicate(attempt + 1);
-        continue;
-      }
+    await this.dismissOpenOverlays();
 
-      await this.dismissOpenOverlays();
+    const requestBtn = this.requestApprovalButton();
+    await expect(requestBtn).toBeVisible({ timeout: 15_000 });
+    await expect(requestBtn).toBeEnabled({ timeout: 15_000 });
 
-      const requestBtn = this.requestApprovalButton();
-      if (!(await requestBtn.isVisible().catch(() => false))) {
-        if (await this.isWaitingForApproval()) {
-          return;
-        }
-        throw new Error(
-          'Request For Approval button is not visible and blanket order is not in Waiting For Approval.'
-        );
-      }
-
-      await expect(requestBtn).toBeEnabled({ timeout: 15_000 });
-
-      const rpc = this.page
+    await Promise.all([
+      this.page
         .waitForResponse(
           (response) => {
             if (!response.url().includes('call_kw') || response.request().method() !== 'POST') {
@@ -579,30 +566,21 @@ export class SalesBlanketOrderComponent extends BasePage {
           },
           { timeout: 90_000 }
         )
-        .catch(() => null);
+        .catch(() => null),
+      requestBtn.click({ timeout: 15_000 }),
+    ]);
 
-      await requestBtn.click({ timeout: 30_000 });
-      await rpc;
-      await this.confirmDialogIfPresent();
-      await this.dismissOpenOverlays();
+    await this.confirmDialogIfPresent();
+    await this.dismissOpenOverlays();
 
-      if (await this.dismissDuplicateBlanketModal()) {
-        await this.editAndRefreshForDuplicate(attempt + 1);
-        continue;
-      }
-
-      try {
-        await expect.poll(() => this.isWaitingForApproval(), { timeout: 60_000 }).toBe(true);
-        return;
-      } catch {
-        // retry after duplicate refresh or another click attempt
-      }
+    if (await this.dismissDuplicateBlanketModal()) {
+      throw new Error(
+        'Request For Approval gagal: data duplikat (Customer + Start Date + End Date + Product). ' +
+          'Ubah tanggal/produk atau hapus BO lama di server.'
+      );
     }
 
-    throw new Error(
-      'Request For Approval gagal: data duplikat (Customer + Start Date + End Date + Product). ' +
-        'Ubah tanggal/produk atau hapus BO lama di server.'
-    );
+    await expect.poll(() => this.isWaitingForApproval(), { timeout: 60_000 }).toBe(true);
   }
 
   async approve(): Promise<void> {
