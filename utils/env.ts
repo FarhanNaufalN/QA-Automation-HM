@@ -16,6 +16,8 @@ export interface ProjectConfig {
   productQty: string;
   warehouseSearch: string;
   warehouseName: string;
+  directSalesWarehouseSearch: string;
+  directSalesWarehouseName: string;
   journalSearch: string;
   journalName: string;
   blanketOrderPath: string;
@@ -70,6 +72,9 @@ export function getConfig(): ProjectConfig {
     productQty: process.env.PRODUCT_QTY ?? '',
     warehouseSearch: process.env.WAREHOUSE_SEARCH ?? '',
     warehouseName: process.env.WAREHOUSE_NAME ?? '',
+    directSalesWarehouseSearch: process.env.DIRECT_SALES_WAREHOUSE_SEARCH ?? '',
+    directSalesWarehouseName:
+      process.env.DIRECT_SALES_WAREHOUSE_OPTION ?? process.env.DIRECT_SALES_WAREHOUSE_NAME ?? '',
     journalSearch: process.env.JOURNAL_SEARCH ?? '',
     journalName: process.env.JOURNAL_NAME ?? '',
     blanketOrderPath: process.env.BLANKET_ORDER_PATH ?? '',

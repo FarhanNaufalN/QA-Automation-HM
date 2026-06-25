@@ -11,5 +11,9 @@
   "journal": {
     "search": "OCBC",
     "option": "OCBC"
+  },
+  "warehouse": {
+    "search": "Warehouse Consignment",
+    "option": "Warehouse Consignment"
   }
 }

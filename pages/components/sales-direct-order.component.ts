@@ -1,4 +1,4 @@
-import { Page } from '@playwright/test';
+import { Page, expect } from '@playwright/test';
 import {
   SalesQuotationComponent,
   type SalesQuotationLocators,
@@ -94,6 +94,36 @@ export class SalesDirectOrderComponent extends SalesQuotationComponent {
         }
         await this.page.waitForTimeout(1_500);
       }
+    }
+  }
+
+  async selectWarehouse(searchText: string, optionName: string | RegExp): Promise<void> {
+    if (!searchText?.trim()) {
+      return;
+    }
+
+    const field = this.activeForm()
+      .locator('[name="warehouse_id"] input, [name="warehouse_id"] textarea')
+      .or(this.activeForm().getByRole('textbox', { name: /^warehouse$/i }))
+      .first();
+
+    if (!(await field.count())) {
+      return;
+    }
+
+    const expected = typeof optionName === 'string' ? optionName.trim() : undefined;
+    const current = (await field.inputValue().catch(() => '')).trim();
+
+    if (expected && current === expected) {
+      return;
+    }
+
+    await this.fillMany2One(field, searchText, optionName);
+
+    if (expected) {
+      await expect
+        .poll(async () => (await field.inputValue().catch(() => '')).trim(), { timeout: 15_000 })
+        .toBe(expected);
     }
   }
 

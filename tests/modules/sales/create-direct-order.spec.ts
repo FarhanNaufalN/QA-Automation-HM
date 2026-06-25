@@ -6,6 +6,7 @@ interface SalesDirectOrderTestData {
   product: { search: string; option: string };
   quantity: string;
   journal: { search: string; option: string };
+  warehouse?: { search: string; option: string };
 }
 
 const defaults = loadTestData<SalesDirectOrderTestData>('sales-direct-order.json');
@@ -28,8 +29,10 @@ test.describe('Module | Sales — Create Direct Sales Order', () => {
     const productSearch = config.productSearch || defaults.product.search;
     const productName = config.productName || defaults.product.option;
     const quantity = config.productQty || defaults.quantity;
-    const warehouseSearch = config.warehouseSearch;
-    const warehouseName = config.warehouseName;
+    const warehouseSearch =
+      config.directSalesWarehouseSearch || defaults.warehouse?.search || 'Warehouse Consignment';
+    const warehouseName =
+      config.directSalesWarehouseName || defaults.warehouse?.option || 'Warehouse Consignment';
     const journalSearch = config.journalSearch || defaults.journal.search;
     const journalName = config.journalName || defaults.journal.option;
     const listPath = config.directSalesPath || undefined;
@@ -38,10 +41,7 @@ test.describe('Module | Sales — Create Direct Sales Order', () => {
     await salesDirectOrder.clickCreate();
 
     await salesDirectOrder.selectCustomer(customerSearch, customerName);
-
-    if (warehouseSearch?.trim() && warehouseName?.trim()) {
-      await salesDirectOrder.selectWarehouse(warehouseSearch, warehouseName);
-    }
+    await salesDirectOrder.selectWarehouse(warehouseSearch, warehouseName);
 
     await salesDirectOrder.selectJournal(journalSearch, journalName);
 
