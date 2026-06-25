@@ -3,6 +3,7 @@ import { BasePage } from '../base.page';
 import { toLiteralRegExp } from '../../utils/regex';
 
 export interface SalesQuotationLocators {
+  listPath?: string;
   salesModule: string | RegExp;
   quotationsMenu: string | RegExp;
   createButton: string | RegExp;
@@ -18,6 +19,8 @@ export interface SalesQuotationLocators {
 }
 
 const DEFAULT_LOCATORS: SalesQuotationLocators = {
+  listPath:
+    '/web#action=459&model=sale.order&view_type=list&cids=1,40,82&bids=1&menu_id=320',
   salesModule: /sales/i,
   quotationsMenu: /quotations/i,
   createButton: /create/i,
@@ -151,15 +154,27 @@ export class SalesQuotationComponent extends BasePage {
     await this.waitForPageLoad();
   }
 
-  /** Navigate to quotations list — tries direct menu first, then via Sales module. */
-  async navigateToQuotations(): Promise<void> {
-    try {
-      await this.openQuotations();
-    } catch {
-      await this.openSalesModule();
+  /** Navigate to quotations list — direct Odoo action URL (reliable after CRM login). */
+  async navigateToQuotations(listPath?: string): Promise<void> {
+    const path = listPath ?? this.locators.listPath;
+    if (!path) {
+      throw new Error('QUOTATION_PATH is not configured.');
+    }
+
+    await this.interaction.dismissBlockingDialogs();
+    await this.interaction.navigateToOdooAction(path);
+
+    const createButton = this.page
+      .locator('[data-uniq="btn_sale.order_create"], button.o_list_button_add')
+      .filter({ hasText: this.locators.createButton })
+      .first();
+
+    if (!(await createButton.isVisible().catch(() => false))) {
+      await this.interaction.switchTopModule(/sales/i);
       await this.openQuotations();
     }
 
+    await createButton.waitFor({ state: 'visible', timeout: 90_000 });
     await this.interaction.waitForListReady();
     await this.interaction.dismissBlockingDialogs();
   }
@@ -207,8 +222,55 @@ export class SalesQuotationComponent extends BasePage {
     await this.waitForQuotationForm();
   }
 
+  private activeForm(): Locator {
+    return this.page.locator('.o_action_manager .o_form_view').first();
+  }
+
+  private matchesMany2OneValue(current: string, option: string | RegExp): boolean {
+    if (!current.trim()) {
+      return false;
+    }
+    const pattern = typeof option === 'string' ? toLiteralRegExp(option) : option;
+    return pattern.test(current.trim());
+  }
+
+  private async isSalesOrderConfirmed(): Promise<boolean> {
+    const form = this.activeForm();
+    const title = ((await form.locator('h1, .oe_title').first().textContent()) ?? '').trim();
+
+    if (/^new$/i.test(title)) {
+      return false;
+    }
+
+    const activeStatus = form.locator('[role="radio"][aria-checked="true"]').first();
+    if (await activeStatus.count()) {
+      const label =
+        (await activeStatus.getAttribute('aria-label')) ??
+        (await activeStatus.textContent()) ??
+        '';
+      if (/^(closed|sale order)$/i.test(label.trim())) {
+        return true;
+      }
+    }
+
+    const closed = form.getByRole('radio', { name: /^closed$/i }).first();
+    if (await closed.isChecked().catch(() => false)) {
+      return true;
+    }
+
+    const saleOrder = form.getByRole('radio', { name: /^sale order$/i }).first();
+    if (await saleOrder.isChecked().catch(() => false)) {
+      return true;
+    }
+
+    const step = form.locator(
+      'button[data-value="closed"][aria-current="step"], button[data-value="sale"][aria-current="step"]'
+    );
+    return (await step.count()) > 0;
+  }
+
   private customerFieldLocator(): Locator {
-    const form = this.page.locator('.o_form_view').first();
+    const form = this.activeForm();
     return form
       .getByRole('textbox', { name: this.locators.customerField, exact: true })
       .or(form.locator('[name="partner_id"] input, [name="partner_id"] textarea'))
@@ -242,7 +304,7 @@ export class SalesQuotationComponent extends BasePage {
     }
 
     const currentValue = (await field.inputValue()).trim();
-    if (currentValue.length > 8) {
+    if (this.matchesMany2OneValue(currentValue, optionName)) {
       return;
     }
 
@@ -384,6 +446,7 @@ export class SalesQuotationComponent extends BasePage {
   }
 
   async save(): Promise<void> {
+    await this.applyPendingOrderLinesIfNeeded();
     await this.page
       .waitForResponse(
         (response) => response.url().includes('call_kw') && response.request().method() === 'POST'
@@ -392,6 +455,7 @@ export class SalesQuotationComponent extends BasePage {
 
     await this.page.getByRole('button', { name: this.locators.saveButton }).first().click();
     await this.waitForPageLoad();
+    await this.applyPendingOrderLinesIfNeeded();
   }
 
   async expectQuotationSaved(): Promise<void> {
@@ -416,36 +480,59 @@ export class SalesQuotationComponent extends BasePage {
   }
 
   async approve(): Promise<void> {
-    await this.page.getByRole('button', { name: this.locators.approveButton }).first().click();
+    const approveBtn = this.page
+      .locator('.o_form_view')
+      .first()
+      .getByRole('button', { name: this.locators.approveButton });
+    await expect(approveBtn).toBeEnabled({ timeout: 30_000 });
+    await approveBtn.click();
     await this.waitForPageLoad();
     await this.confirmDialogIfPresent();
   }
 
-  async confirmOrder(): Promise<void> {
-    await this.interaction.dismissBlockingDialogs();
-  
-    const confirmButton = this.page
+  private confirmOrderButton(): Locator {
+    return this.activeForm()
       .locator('button[name="action_confirm"]')
-      .or(this.page.getByRole('button', { name: /^confirm$/i }))
+      .or(this.activeForm().getByRole('button', { name: /confirm order|^confirm$/i }))
+      .filter({ visible: true })
       .first();
-  
-    await confirmButton.scrollIntoViewIfNeeded();
+  }
+
+  protected async applyPendingOrderLinesIfNeeded(): Promise<void> {
+    const form = this.activeForm();
+    const applyButton = form.getByRole('button', { name: /^apply$/i }).filter({ visible: true }).first();
+
+    while (await applyButton.isVisible().catch(() => false)) {
+      await applyButton.click();
+      await this.page
+        .locator('.o_loading, .o_blockUI')
+        .first()
+        .waitFor({ state: 'hidden', timeout: 30_000 })
+        .catch(() => undefined);
+      await this.interaction.dismissBlockingDialogs();
+    }
+  }
+
+  async confirmOrder(): Promise<void> {
+    if (await this.isSalesOrderConfirmed()) {
+      return;
+    }
+
+    await this.applyPendingOrderLinesIfNeeded();
+    await this.interaction.dismissBlockingDialogs();
+
+    const confirmButton = this.confirmOrderButton();
+    await expect(confirmButton).toBeVisible({ timeout: 30_000 });
+    await expect(confirmButton).toBeEnabled({ timeout: 30_000 });
     await confirmButton.click();
     await this.waitForPageLoad();
     await this.confirmDialogIfPresent();
   }
-  
-  async expectSalesOrderConfirmed(): Promise<void> {
-    const form = this.page.locator('.o_form_view').first();
 
-    await expect(
-      form
-        .getByRole('radio', { name: /^closed$/i, checked: true })
-        .or(form.getByRole('radio', { name: /^sale order$/i, checked: true }))
-        .or(form.locator('button[data-value="closed"][aria-current="step"]'))
-        .or(form.locator('button[data-value="sale"][aria-current="step"]'))
-        .first()
-    ).toBeAttached({ timeout: 15_000 });
+  async expectSalesOrderConfirmed(): Promise<void> {
+    const form = this.activeForm();
+
+    await expect.poll(() => this.isSalesOrderConfirmed(), { timeout: 30_000 }).toBe(true);
 
     await expect(form.locator('h1, .oe_title').first()).not.toHaveText(/^new$/i, {
       timeout: 5_000,
@@ -453,20 +540,49 @@ export class SalesQuotationComponent extends BasePage {
   }
 
   async expectWaitingForApproval(): Promise<void> {
-    // Odoo statusbar uses `role="radio"` steps that can be visibility:hidden while still active.
-    const step = this.page
-      .locator('.o_form_view button[data-value="waiting_for_approval"][aria-current="step"]')
-      .first();
-    await expect(step).toBeAttached({ timeout: 15_000 });
+    const form = this.page.locator('.o_form_view').first();
+    await expect
+      .poll(
+        async () => {
+          const waitingRadio = form.getByRole('radio', {
+            name: /waiting for sale order approval/i,
+          });
+          if ((await waitingRadio.count()) && (await waitingRadio.isChecked())) {
+            return true;
+          }
+          const step = form.locator(
+            'button[data-value="waiting_for_approval"][aria-current="step"]'
+          );
+          return (await step.count()) > 0;
+        },
+        { timeout: 30_000 }
+      )
+      .toBe(true);
   }
 
   async expectQuotationApproved(): Promise<void> {
-    // After Approve, HashMicro often advances past "Quotation Approved" to "Sale Order";
-    // the active `aria-current` step is no longer `waiting_for_approval`.
-    const form = this.page.locator('.o_form_view');
-    await expect(form.locator('button[data-value="waiting_for_approval"][aria-current="step"]')).toHaveCount(
-      0,
-      { timeout: 60_000 }
-    );
+    const form = this.page.locator('.o_form_view').first();
+
+    await expect
+      .poll(
+        async () => {
+          const saleOrder = form.getByRole('radio', { name: /^sale order$/i });
+          const quotation = form.getByRole('radio', { name: /^quotation approved$/i });
+          if ((await saleOrder.count()) && (await saleOrder.isChecked())) {
+            return true;
+          }
+          if ((await quotation.count()) && (await quotation.isChecked())) {
+            return true;
+          }
+          const step = form
+            .locator(
+              'button[data-value="sale"][aria-current="step"], button[data-value="approved"][aria-current="step"]'
+            )
+            .first();
+          return (await step.count()) > 0;
+        },
+        { timeout: 60_000 }
+      )
+      .toBe(true);
   }
 }

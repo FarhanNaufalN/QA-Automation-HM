@@ -11,6 +11,18 @@ export class InteractionHelper {
   /** Close Odoo / ERP modals that block clicks (errors, list-view manager, etc.). */
   async dismissBlockingDialogs(): Promise<void> {
     for (let attempt = 0; attempt < 5; attempt++) {
+      const alert = this.page.locator('.alert, [role="alert"]').filter({ visible: true }).first();
+      if (await alert.count()) {
+        const closeAlert = alert.getByRole('button', { name: /^close$/i });
+        if (await closeAlert.count()) {
+          await closeAlert.first().click();
+        } else {
+          await this.page.keyboard.press('Escape').catch(() => undefined);
+        }
+        await this.page.waitForTimeout(300);
+        continue;
+      }
+
       const modal = this.page
         .locator('.modal.show, [role="dialog"][open], .modal.o_technical_modal.show')
         .filter({ visible: true })
@@ -117,6 +129,8 @@ export class InteractionHelper {
 
   /** Odoo app switcher / home menu → pick app by name. */
   async openOdooApp(name: string | RegExp): Promise<void> {
+    await this.dismissBlockingDialogs();
+
     const toggle = this.page
       .locator('.o_menu_toggle, .o_menu_apps .dropdown-toggle, .o_navbar_apps_menu button')
       .first();
@@ -129,7 +143,13 @@ export class InteractionHelper {
       .filter({ hasText: name })
       .filter({ visible: true })
       .first();
-    await app.click({ timeout: 15_000 });
+
+    if (await app.count()) {
+      await app.click({ timeout: 15_000 });
+      return;
+    }
+
+    await this.switchTopModule(name);
   }
 
   /** HashMicro top navbar module switcher (CRM → Sales, etc.). */
@@ -159,10 +179,25 @@ export class InteractionHelper {
     await toggle.click();
     await this.page.waitForTimeout(500);
 
-    const navbar = this.page.locator('header, .o_main_navbar, nav').first();
-    const item = navbar.getByRole('menuitem', { name: pattern }).first();
+    const item = this.page
+      .getByRole('menuitem', { name: pattern })
+      .filter({ visible: true })
+      .first();
     await item.click({ timeout: 15_000 });
     await this.page.waitForTimeout(2_000);
+  }
+
+  private menuPatternToSearchLabel(name: string | RegExp): string {
+    if (typeof name === 'string') {
+      return name;
+    }
+    return (
+      name.source
+        .replace(/^\^|\$$/g, '')
+        .replace(/\\(.)/g, '$1')
+        .split('|')[0]
+        .trim() || 'Sales'
+    );
   }
 
   /** Fill missing or empty cids/bids from the current Odoo session URL. */
@@ -265,7 +300,7 @@ export class InteractionHelper {
   async openSidebarMenu(name: string | RegExp): Promise<void> {
     await this.ensureSidebarOpen();
 
-    const label = typeof name === 'string' ? name : 'Sales';
+    const label = this.menuPatternToSearchLabel(name);
 
     const search = this.page.locator('input[placeholder*="Search" i]').filter({ visible: true }).first();
     if (await search.count()) {
@@ -283,6 +318,19 @@ export class InteractionHelper {
     if (await menuitem.count()) {
       await menuitem.first().click();
       return;
+    }
+
+    const isSalesNav =
+      (typeof name === 'string' && /sales/i.test(name)) ||
+      (name instanceof RegExp && /sales/i.test(name.source));
+
+    if (isSalesNav) {
+      await this.switchTopModule(/sales/i);
+      const salesItem = this.page.getByRole('menuitem', { name }).filter({ visible: true });
+      if (await salesItem.count()) {
+        await salesItem.first().click();
+        return;
+      }
     }
 
     await this.openOdooApp(name);
@@ -390,10 +438,16 @@ export class InteractionHelper {
     throw new Error(`No Odoo autocomplete option found for ${String(optionName)}`);
   }
 
-  /** Pick the first visible Odoo autocomplete / dropdown option. */
+  /** Pick the first visible Odoo autocomplete / many2many tag option. */
   async selectFirstOdooAutocompleteOption(): Promise<void> {
     const item = this.page
       .locator('.ui-autocomplete li:visible a, .ui-autocomplete li:visible')
+      .or(
+        this.page
+          .getByRole('listitem')
+          .filter({ hasNotText: /search more|start typing/i })
+      )
+      .filter({ visible: true })
       .first();
 
     await item.waitFor({ state: 'visible', timeout: 15_000 });

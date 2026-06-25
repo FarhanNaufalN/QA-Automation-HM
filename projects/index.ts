@@ -10,6 +10,7 @@ import {
   type SalesDirectOrderLocators,
 } from '../pages';
 import { hashWarehouseFixture } from './hash-warehouse';
+import { hashSalesFixture } from './hash-sales';
 import { hashFinanceFixture } from './hash-finance';
 import { hashRetailFixture } from './hash-retail';
 
@@ -26,9 +27,10 @@ export interface ProjectFixture {
 }
 
 const PROJECT_MAP: Record<string, ProjectFixture> = {
-  score22: hashWarehouseFixture,
-  teazie: hashWarehouseFixture,
+  score22: hashSalesFixture,
+  teazie: hashSalesFixture,
   'hash-warehouse': hashWarehouseFixture,
+  'hash-sales': hashSalesFixture,
   'hash-finance': hashFinanceFixture,
   'hash-retail': hashRetailFixture,
 };

@@ -116,6 +116,15 @@ export class SalesDirectOrderComponent extends SalesQuotationComponent {
     await this.page.keyboard.press('Escape').catch(() => undefined);
   }
 
+  async addProductLine(
+    productSearch: string,
+    productOption: string | RegExp,
+    quantity: string
+  ): Promise<void> {
+    await super.addProductLine(productSearch, productOption, quantity);
+    await this.applyPendingOrderLinesIfNeeded();
+  }
+
   async expectDirectOrderSaved(): Promise<void> {
     await this.expectQuotationSaved();
   }

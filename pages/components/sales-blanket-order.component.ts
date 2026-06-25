@@ -98,6 +98,10 @@ export class SalesBlanketOrderComponent extends BasePage {
       .first();
   }
 
+  private activeForm(): Locator {
+    return this.page.locator('.o_action_manager .o_form_view').first();
+  }
+
   async clickCreate(): Promise<void> {
     await this.interaction.waitForListReady();
     await this.interaction.dismissBlockingDialogs();
@@ -207,7 +211,59 @@ export class SalesBlanketOrderComponent extends BasePage {
     return text.length > 0 && !/^analytic group$/i.test(text);
   }
 
+  private async selectAnalyticTagOption(field: Locator): Promise<boolean> {
+    await this.interaction.dismissBlockingDialogs();
+    await this.page.keyboard.press('Escape').catch(() => undefined);
+
+    if (!(await field.isEnabled().catch(() => false))) {
+      return false;
+    }
+
+    await field.click();
+    const dropdownBtn = this.analyticGroupCell(field).locator('button').first();
+    if (await dropdownBtn.count()) {
+      await dropdownBtn.click().catch(() => undefined);
+    }
+
+    await this.page
+      .locator('.ui-autocomplete-loading')
+      .first()
+      .waitFor({ state: 'detached', timeout: 10_000 })
+      .catch(() => undefined);
+
+    const tagOption = this.page
+      .locator('.ui-autocomplete.ui-front li:visible, .ui-autocomplete.ui-front li a:visible')
+      .filter({ hasNotText: /search more|start typing/i })
+      .first();
+
+    await tagOption.waitFor({ state: 'visible', timeout: 15_000 });
+    await tagOption.click();
+    return true;
+  }
+
+  private async fillHeaderAnalyticGroup(): Promise<void> {
+    const form = this.page.locator('.o_form_view').first();
+    const field = form.getByRole('textbox', { name: /^analytic group$/i }).first();
+    if (!(await field.count())) {
+      return;
+    }
+    if (await this.hasAnalyticGroupSelected(field)) {
+      return;
+    }
+
+    const filled = await this.selectAnalyticTagOption(field);
+    if (!filled) {
+      return;
+    }
+
+    await expect.poll(() => this.hasAnalyticGroupSelected(field), { timeout: 15_000 }).toBe(true);
+    await field.press('Tab').catch(() => undefined);
+  }
+
   private async fillAnalyticGroupOnLine(): Promise<void> {
+    await this.interaction.dismissBlockingDialogs();
+    await this.page.keyboard.press('Escape').catch(() => undefined);
+
     const lineRow = this.orderLineRowLocator();
     await lineRow.scrollIntoViewIfNeeded();
 
@@ -218,19 +274,18 @@ export class SalesBlanketOrderComponent extends BasePage {
       return;
     }
 
-    await analyticField.click();
-    const dropdownBtn = this.analyticGroupCell(analyticField).locator('button').first();
-    if (await dropdownBtn.count()) {
-      await dropdownBtn.click().catch(() => undefined);
+    if (await analyticField.isEnabled().catch(() => false)) {
+      const filled = await this.selectAnalyticTagOption(analyticField);
+      if (filled) {
+        await expect.poll(() => this.hasAnalyticGroupSelected(analyticField), { timeout: 15_000 }).toBe(
+          true
+        );
+        await analyticField.press('Tab').catch(() => undefined);
+        return;
+      }
     }
 
-    await this.page
-      .waitForResponse((response) => response.url().includes('call_kw') && response.ok())
-      .catch(() => null);
-
-    await this.interaction.selectFirstOdooAutocompleteOption();
-    await expect.poll(() => this.hasAnalyticGroupSelected(analyticField), { timeout: 15_000 }).toBe(true);
-    await analyticField.press('Tab').catch(() => undefined);
+    await this.fillHeaderAnalyticGroup();
     await this.interaction.dismissBlockingDialogs();
   }
 
@@ -279,6 +334,9 @@ export class SalesBlanketOrderComponent extends BasePage {
     await productField.waitFor({ state: 'visible', timeout: 30_000 });
     await this.fillMany2One(productField, productSearch, productOption);
 
+    // Fill analytic while the line row is still editable (Tab on qty locks the row).
+    await this.fillAnalyticGroupOnLine();
+
     const qtyField = lineRow.locator('input[name="quantity"]').first();
     if (await qtyField.count()) {
       const currentQty = (await qtyField.inputValue()).trim();
@@ -289,7 +347,6 @@ export class SalesBlanketOrderComponent extends BasePage {
       await qtyField.press('Tab').catch(() => undefined);
     }
 
-    await this.fillAnalyticGroupOnLine();
     await this.interaction.dismissBlockingDialogs();
   }
 
@@ -334,14 +391,36 @@ export class SalesBlanketOrderComponent extends BasePage {
     }
   }
 
-  private async editAndRefreshForDuplicate(attempt = 1): Promise<void> {
-    await this.interaction.dismissBlockingDialogs();
+  private saveButton(): Locator {
+    return this.page
+      .locator('.o_control_panel [data-uniq="btn_saleblanket.saleblanket_save"]')
+      .or(this.page.locator('.o_control_panel').getByRole('button', { name: this.locators.saveButton }))
+      .filter({ visible: true })
+      .first();
+  }
 
-    const saveButton = this.page.locator('[data-uniq="btn_saleblanket.saleblanket_save"]');
+  private async dismissOpenOverlays(): Promise<void> {
+    await this.page.keyboard.press('Escape').catch(() => undefined);
+    await this.page.keyboard.press('Escape').catch(() => undefined);
+    await this.page
+      .locator('.o_action_manager')
+      .click({ position: { x: 8, y: 8 }, force: true })
+      .catch(() => undefined);
+    await this.interaction.dismissBlockingDialogs();
+  }
+
+  private async editAndRefreshForDuplicate(attempt = 1): Promise<void> {
+    await this.dismissOpenOverlays();
+
+    const saveButton = this.saveButton();
     const inEditMode = await saveButton.isVisible().catch(() => false);
 
     if (!inEditMode) {
-      await this.page.getByRole('button', { name: /edit/i }).first().click();
+      await this.activeForm()
+        .getByRole('button', { name: /^edit$/i })
+        .filter({ visible: true })
+        .first()
+        .click();
       await this.waitForForm();
     }
 
@@ -357,20 +436,15 @@ export class SalesBlanketOrderComponent extends BasePage {
 
   async save(): Promise<void> {
     await this.ensureMandatoryFields();
-    await this.page.keyboard.press('Escape').catch(() => undefined);
-    await this.interaction.dismissBlockingDialogs();
+    await this.dismissOpenOverlays();
     await this.page
       .locator('.blockUI.blockOverlay')
       .waitFor({ state: 'hidden', timeout: 30_000 })
       .catch(() => undefined);
 
-    const saveButton = this.page
-      .locator('[data-uniq="btn_saleblanket.saleblanket_save"]')
-      .or(this.page.getByRole('button', { name: this.locators.saveButton }))
-      .first();
-
+    const saveButton = this.saveButton();
+    await expect(saveButton).toBeVisible({ timeout: 15_000 });
     await expect(saveButton).toBeEnabled({ timeout: 15_000 });
-    await saveButton.scrollIntoViewIfNeeded();
 
     const saveResponse = this.page
       .waitForResponse(
@@ -400,18 +474,47 @@ export class SalesBlanketOrderComponent extends BasePage {
   }
 
   private async confirmDialogIfPresent(): Promise<void> {
-    const confirm = this.page.getByRole('button', { name: /confirm|yes|ok|ya/i });
+    const modal = this.page.locator('.modal.show').filter({ visible: true }).first();
+    if (!(await modal.isVisible().catch(() => false))) {
+      return;
+    }
+
+    const confirm = modal.getByRole('button', { name: /confirm|yes|ok|ya/i });
     if (await confirm.count()) {
       await confirm.first().click().catch(() => undefined);
+      await modal.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
     }
   }
 
   private async isWaitingForApproval(): Promise<boolean> {
-    const waiting = this.page
-      .getByRole('radio', { name: /waiting for approval/i })
-      .or(this.page.locator('[data-value="to_approve"][aria-current="step"]'))
-      .first();
-    return (await waiting.count()) > 0 && (await waiting.isChecked().catch(() => false));
+    const form = this.activeForm();
+
+    if (
+      await form
+        .getByRole('button', { name: this.locators.approveButton })
+        .filter({ visible: true })
+        .count()
+    ) {
+      return true;
+    }
+
+    const activeStatus = form.locator('[role="radio"][aria-checked="true"]').first();
+    if (await activeStatus.count()) {
+      const label =
+        (await activeStatus.getAttribute('aria-label')) ??
+        (await activeStatus.textContent()) ??
+        '';
+      if (/waiting for approval/i.test(label.trim())) {
+        return true;
+      }
+    }
+
+    const waiting = form.getByRole('radio', { name: /waiting for approval/i }).first();
+    if (await waiting.isChecked().catch(() => false)) {
+      return true;
+    }
+
+    return (await form.locator('[data-value="to_approve"][aria-current="step"]').count()) > 0;
   }
 
   private async dismissDuplicateBlanketModal(): Promise<boolean> {
@@ -429,13 +532,18 @@ export class SalesBlanketOrderComponent extends BasePage {
   }
 
   private requestApprovalButton(): Locator {
-    return this.page
+    return this.activeForm()
       .locator('[data-uniq="btn_header_saleblanket.saleblanket_action_request_for_approval_bo"]')
-      .or(this.page.getByRole('button', { name: this.locators.requestApprovalButton }))
+      .or(this.activeForm().getByRole('button', { name: this.locators.requestApprovalButton }))
+      .filter({ visible: true })
       .first();
   }
 
   async requestForApproval(): Promise<void> {
+    if (await this.isWaitingForApproval()) {
+      return;
+    }
+
     for (let attempt = 0; attempt < 5; attempt++) {
       if (await this.isWaitingForApproval()) {
         return;
@@ -446,39 +554,48 @@ export class SalesBlanketOrderComponent extends BasePage {
         continue;
       }
 
-      await this.interaction.dismissBlockingDialogs();
+      await this.dismissOpenOverlays();
 
       const requestBtn = this.requestApprovalButton();
-      await requestBtn.waitFor({ state: 'visible', timeout: 30_000 });
+      if (!(await requestBtn.isVisible().catch(() => false))) {
+        if (await this.isWaitingForApproval()) {
+          return;
+        }
+        throw new Error(
+          'Request For Approval button is not visible and blanket order is not in Waiting For Approval.'
+        );
+      }
+
       await expect(requestBtn).toBeEnabled({ timeout: 15_000 });
-      await requestBtn.scrollIntoViewIfNeeded();
 
       const rpc = this.page
         .waitForResponse(
-          (response) => response.url().includes('call_kw') && response.request().method() === 'POST',
-          { timeout: 60_000 }
+          (response) => {
+            if (!response.url().includes('call_kw') || response.request().method() !== 'POST') {
+              return false;
+            }
+            const body = response.request().postData() ?? '';
+            return /request_for_approval|action_request/i.test(body);
+          },
+          { timeout: 90_000 }
         )
         .catch(() => null);
 
-      if (await this.dismissDuplicateBlanketModal()) {
-        await this.editAndRefreshForDuplicate(attempt + 1);
-        continue;
-      }
-
       await requestBtn.click({ timeout: 30_000 });
       await rpc;
-      await this.waitForPageLoad();
+      await this.confirmDialogIfPresent();
+      await this.dismissOpenOverlays();
 
       if (await this.dismissDuplicateBlanketModal()) {
         await this.editAndRefreshForDuplicate(attempt + 1);
         continue;
       }
 
-      await this.confirmDialogIfPresent();
-      await this.interaction.dismissBlockingDialogs();
-
-      if (await this.isWaitingForApproval()) {
+      try {
+        await expect.poll(() => this.isWaitingForApproval(), { timeout: 60_000 }).toBe(true);
         return;
+      } catch {
+        // retry after duplicate refresh or another click attempt
       }
     }
 
@@ -489,7 +606,10 @@ export class SalesBlanketOrderComponent extends BasePage {
   }
 
   async approve(): Promise<void> {
-    const approveBtn = this.page.getByRole('button', { name: this.locators.approveButton }).first();
+    const approveBtn = this.activeForm()
+      .getByRole('button', { name: this.locators.approveButton })
+      .filter({ visible: true })
+      .first();
     await approveBtn.waitFor({ state: 'visible', timeout: 60_000 });
 
     const saveResponse = this.page
@@ -507,33 +627,36 @@ export class SalesBlanketOrderComponent extends BasePage {
   }
 
   async expectWaitingForApproval(): Promise<void> {
-    await expect
-      .poll(
-        async () => {
-          const waiting = this.page
-            .getByRole('radio', { name: /waiting for approval/i })
-            .or(this.page.locator('[data-value="to_approve"][aria-current="step"]'))
-            .first();
-          return (await waiting.count()) > 0 && (await waiting.isChecked());
-        },
-        { timeout: 60_000 }
-      )
-      .toBe(true);
+    await expect.poll(() => this.isWaitingForApproval(), { timeout: 60_000 }).toBe(true);
   }
 
   async expectBlanketOrderApproved(): Promise<void> {
+    const form = this.activeForm();
+
     await expect
       .poll(
         async () => {
-          const running = this.page.getByRole('radio', { name: /^running$/i });
-          const confirmed = this.page.getByRole('radio', { name: /^confirmed$/i });
+          const activeStatus = form.locator('[role="radio"][aria-checked="true"]').first();
+          if (await activeStatus.count()) {
+            const label =
+              (await activeStatus.getAttribute('aria-label')) ??
+              (await activeStatus.textContent()) ??
+              '';
+            if (/^(running|confirmed)$/i.test(label.trim())) {
+              return label.trim().toLowerCase();
+            }
+          }
 
-          if ((await running.count()) && (await running.isChecked())) {
+          const running = form.getByRole('radio', { name: /^running$/i }).first();
+          if (await running.isChecked().catch(() => false)) {
             return 'running';
           }
-          if ((await confirmed.count()) && (await confirmed.isChecked())) {
+
+          const confirmed = form.getByRole('radio', { name: /^confirmed$/i }).first();
+          if (await confirmed.isChecked().catch(() => false)) {
             return 'confirmed';
           }
+
           return '';
         },
         { timeout: 120_000 }

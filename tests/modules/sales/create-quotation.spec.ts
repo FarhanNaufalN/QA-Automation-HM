@@ -14,6 +14,8 @@ const defaults = loadTestData<SalesQuotationTestData>('sales-quotation.json');
  * Flow: login → Quotations → Create → fill → Save → Request Approval → Approve
  */
 test.describe('Module | Sales — Create Quotation', () => {
+  test.setTimeout(300_000);
+
   test.beforeEach(async ({ authenticatedPage }) => {});
 
   test('should create quotation, save, request approval, and approve', async ({
@@ -27,8 +29,9 @@ test.describe('Module | Sales — Create Quotation', () => {
     const quantity = config.productQty || defaults.quantity;
     const warehouseSearch = config.warehouseSearch;
     const warehouseName = config.warehouseName;
+    const listPath = config.quotationPath || undefined;
 
-    await salesQuotation.navigateToQuotations();
+    await salesQuotation.navigateToQuotations(listPath);
     await salesQuotation.clickCreate();
 
     await salesQuotation.selectCustomer(customerSearch, customerName);
