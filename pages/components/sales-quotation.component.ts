@@ -223,7 +223,7 @@ export class SalesQuotationComponent extends BasePage {
   }
 
   protected activeForm(): Locator {
-    return this.page.locator('.o_action_manager .o_form_view').first();
+    return this.page.locator('.o_action_manager .o_form_view:visible').last();
   }
 
   private matchesMany2OneValue(current: string, option: string | RegExp): boolean {
@@ -535,9 +535,10 @@ export class SalesQuotationComponent extends BasePage {
   }
 
   private confirmOrderButton(): Locator {
-    return this.activeForm()
-      .locator('button[name="action_confirm"]')
-      .or(this.activeForm().getByRole('button', { name: /confirm order|^confirm$/i }))
+    const form = this.activeForm();
+    return form
+      .locator('button[name="action_confirm"]:visible')
+      .or(form.getByRole('button', { name: /confirm order|^confirm$/i }))
       .filter({ visible: true })
       .first();
   }
