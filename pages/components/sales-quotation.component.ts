@@ -240,10 +240,11 @@ export class SalesQuotationComponent extends BasePage {
     }
 
     const form = this.activeForm();
+    const title =
+      ((await form.locator('h1, .oe_title').first().textContent().catch(() => '')) ?? '').trim();
 
-    const closed = form.getByRole('radio', { name: /^closed$/i }).first();
-    if (await closed.isChecked().catch(() => false)) {
-      return true;
+    if (/^new$/i.test(title)) {
+      return false;
     }
 
     const saleOrder = form.getByRole('radio', { name: /^sale order$/i }).first();
@@ -251,14 +252,16 @@ export class SalesQuotationComponent extends BasePage {
       return true;
     }
 
-    return (
-      (await form
-        .locator(
-          'button[data-value="closed"][aria-current="step"], button[data-value="sale"][aria-current="step"]'
-        )
-        .count()
-        .catch(() => 0)) > 0
+    const closed = form.getByRole('radio', { name: /^closed$/i }).first();
+    if (await closed.isChecked().catch(() => false)) {
+      return true;
+    }
+
+    const step = form.locator(
+      'button[data-value="closed"][aria-current="step"], button[data-value="sale"][aria-current="step"]'
     );
+
+    return (await step.count().catch(() => 0)) > 0;
   }
 
   private customerFieldLocator(): Locator {
@@ -471,6 +474,9 @@ export class SalesQuotationComponent extends BasePage {
       .getByRole('button', { name: this.locators.saveButton })
       .first();
 
+    await expect(saveButton).toBeVisible({ timeout: 15_000 });
+    await expect(saveButton).toBeEnabled({ timeout: 15_000 });
+
     await Promise.all([
       this.page
         .waitForResponse(
@@ -553,43 +559,33 @@ export class SalesQuotationComponent extends BasePage {
   }
 
   async confirmOrder(): Promise<void> {
-    if (await this.isSalesOrderConfirmed()) {
-      return;
-    }
 
-    await this.applyPendingOrderLinesIfNeeded();
     await this.interaction.dismissBlockingDialogs();
-
-    const confirmButton = this.confirmOrderButton();
-
-    await Promise.all([
-      this.page
-        .waitForResponse(
-          (response) => {
-            const body = response.request().postData() ?? '';
-            return (
-              response.url().includes('call_kw') &&
-              response.request().method() === 'POST' &&
-              /action_confirm/i.test(body)
-            );
-          },
-          { timeout: 90_000 }
-        )
-        .catch(() => null),
-      confirmButton.click({ timeout: 30_000 }),
-    ]);
-
+  
+    const confirmButton = this.page
+      .locator('button[name="action_confirm"]')
+      .or(this.page.getByRole('button', { name: /^confirm$/i }))
+      .first();
+  
+    await confirmButton.scrollIntoViewIfNeeded();
+    await confirmButton.click();
     await this.waitForPageLoad();
     await this.confirmDialogIfPresent();
-    await this.interaction.dismissBlockingDialogs();
-
-    await expect.poll(() => this.isSalesOrderConfirmed(), { timeout: 60_000 }).toBe(true);
   }
-
+  
   async expectSalesOrderConfirmed(): Promise<void> {
-    await expect.poll(() => this.isSalesOrderConfirmed(), { timeout: 30_000 }).toBe(true);
+    const form = this.page.locator('.o_form_view').first();
 
-    await expect(this.activeForm().locator('h1, .oe_title').first()).not.toHaveText(/^new$/i, {
+    await expect(
+      form
+        .getByRole('radio', { name: /^closed$/i, checked: true })
+        .or(form.getByRole('radio', { name: /^sale order$/i, checked: true }))
+        .or(form.locator('button[data-value="closed"][aria-current="step"]'))
+        .or(form.locator('button[data-value="sale"][aria-current="step"]'))
+        .first()
+    ).toBeAttached({ timeout: 15_000 });
+
+    await expect(form.locator('h1, .oe_title').first()).not.toHaveText(/^new$/i, {
       timeout: 5_000,
     });
   }

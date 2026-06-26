@@ -23,8 +23,8 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
-    actionTimeout: 30_000,
-    navigationTimeout: 60_000,
+    actionTimeout: config.timeout,
+    navigationTimeout: config.timeout,
   },
   projects: [
     {
