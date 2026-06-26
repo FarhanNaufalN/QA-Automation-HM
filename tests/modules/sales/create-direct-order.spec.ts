@@ -16,7 +16,7 @@ const defaults = loadTestData<SalesDirectOrderTestData>('sales-direct-order.json
  * Flow: login → Direct Sales → Create → fill → Save → Confirm
  */
 test.describe('Module | Sales — Create Direct Sales Order', () => {
-  test.setTimeout(300_000);
+  test.setTimeout(180_000);
 
   test.beforeEach(async ({ authenticatedPage }) => {});
 

@@ -240,11 +240,10 @@ export class SalesQuotationComponent extends BasePage {
     }
 
     const form = this.activeForm();
-    const title =
-      ((await form.locator('h1, .oe_title').first().textContent().catch(() => '')) ?? '').trim();
 
-    if (/^new$/i.test(title)) {
-      return false;
+    const closed = form.getByRole('radio', { name: /^closed$/i }).first();
+    if (await closed.isChecked().catch(() => false)) {
+      return true;
     }
 
     const saleOrder = form.getByRole('radio', { name: /^sale order$/i }).first();
@@ -252,27 +251,14 @@ export class SalesQuotationComponent extends BasePage {
       return true;
     }
 
-    const closed = form.getByRole('radio', { name: /^closed$/i }).first();
-    if (await closed.isChecked().catch(() => false)) {
-      return true;
-    }
-
-    const step = form.locator(
-      'button[data-value="closed"][aria-current="step"], button[data-value="sale"][aria-current="step"]'
+    return (
+      (await form
+        .locator(
+          'button[data-value="closed"][aria-current="step"], button[data-value="sale"][aria-current="step"]'
+        )
+        .count()
+        .catch(() => 0)) > 0
     );
-
-    return (await step.count().catch(() => 0)) > 0;
-  }
-
-  private async isQuotation(): Promise<boolean> {
-    if (this.page.isClosed()) {
-      return false;
-    }
-
-    return this.activeForm()
-      .getByRole('radio', { name: /^quotation$/i })
-      .isChecked()
-      .catch(() => false);
   }
 
   private customerFieldLocator(): Locator {
@@ -485,9 +471,6 @@ export class SalesQuotationComponent extends BasePage {
       .getByRole('button', { name: this.locators.saveButton })
       .first();
 
-    await expect(saveButton).toBeVisible({ timeout: 15_000 });
-    await expect(saveButton).toBeEnabled({ timeout: 15_000 });
-
     await Promise.all([
       this.page
         .waitForResponse(
@@ -578,8 +561,6 @@ export class SalesQuotationComponent extends BasePage {
     await this.interaction.dismissBlockingDialogs();
 
     const confirmButton = this.confirmOrderButton();
-    await expect(confirmButton).toBeVisible({ timeout: 30_000 });
-    await expect(confirmButton).toBeEnabled({ timeout: 30_000 });
 
     await Promise.all([
       this.page
@@ -589,51 +570,30 @@ export class SalesQuotationComponent extends BasePage {
             return (
               response.url().includes('call_kw') &&
               response.request().method() === 'POST' &&
-              /action_confirm|confirm/i.test(body)
+              /action_confirm/i.test(body)
             );
           },
           { timeout: 90_000 }
         )
         .catch(() => null),
-      confirmButton.click({ timeout: 15_000 }),
+      confirmButton.click({ timeout: 30_000 }),
     ]);
 
     await this.waitForPageLoad();
     await this.confirmDialogIfPresent();
     await this.interaction.dismissBlockingDialogs();
 
-    const confirmed = await expect
-      .poll(() => this.isSalesOrderConfirmed(), { timeout: 60_000 })
-      .toBe(true)
-      .then(() => true)
-      .catch(() => false);
-
-    if (!confirmed) {
-      const stillConfirmable = await this.confirmOrderButton().isVisible().catch(() => false);
-      const quotation = await this.isQuotation();
-      throw new Error(
-        `Direct Sales confirm gagal: state tetap Quotation=${quotation}, confirmButtonVisible=${stillConfirmable}`
-      );
-    }
+    await expect.poll(() => this.isSalesOrderConfirmed(), { timeout: 60_000 }).toBe(true);
   }
 
   async expectSalesOrderConfirmed(): Promise<void> {
-    const form = this.activeForm();
+    await expect.poll(() => this.isSalesOrderConfirmed(), { timeout: 30_000 }).toBe(true);
 
-    try {
-      await expect.poll(() => this.isSalesOrderConfirmed(), { timeout: 30_000 }).toBe(true);
-    } catch {
-      const confirmStillVisible = await this.confirmOrderButton().isVisible().catch(() => false);
-      throw new Error(
-        `Direct Sales order is not confirmed. confirmButtonVisible=${confirmStillVisible}`
-      );
-    }
-
-    await expect(form.locator('h1, .oe_title').first()).not.toHaveText(/^new$/i, {
+    await expect(this.activeForm().locator('h1, .oe_title').first()).not.toHaveText(/^new$/i, {
       timeout: 5_000,
     });
   }
-
+  
   async expectWaitingForApproval(): Promise<void> {
     const form = this.page.locator('.o_form_view').first();
     await expect

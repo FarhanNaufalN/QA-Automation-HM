@@ -34,5 +34,10 @@ export class BasePage {
 
   async waitForPageLoad(): Promise<void> {
     await this.page.waitForLoadState('domcontentloaded');
+    await this.page
+      .locator('.o_loading, .o_blockUI, .o_spinner')
+      .first()
+      .waitFor({ state: 'hidden', timeout: 30_000 })
+      .catch(() => undefined);
   }
 }
