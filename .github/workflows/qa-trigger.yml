@@ -1,55 +1,40 @@
-name: QA Automation Run
-
-run-name: 'QA [${{ inputs.test_suite }}] corr:${{ inputs.correlation_id }}'
+name: QA Automation Trigger
 
 on:
   workflow_dispatch:
     inputs:
       correlation_id:
-        description: 'Unique ID for QA Apps to track this run'
         required: true
         type: string
       test_suite:
-        description: 'chromium | chromium-login | firefox | regression-sales | regression-inventory | regression-purchasing | regression-finance'
         required: true
-        default: 'chromium'
         type: string
       test_spec:
-        description: 'Specific spec file (optional, e.g. tests/modules/sales/create-quotation.spec.ts)'
         required: false
-        default: ''
         type: string
       base_url:
-        description: 'Target HM3 URL'
         required: true
         type: string
       database:
-        description: 'HM3 database name'
         required: true
         type: string
       username:
-        description: 'HM3 login username'
         required: true
         type: string
       password:
-        description: 'HM3 login password'
         required: true
         type: string
       customer_search:
         required: false
-        default: ''
         type: string
       customer_name:
         required: false
-        default: ''
         type: string
       product_search:
         required: false
-        default: ''
         type: string
       product_name:
         required: false
-        default: ''
         type: string
       product_qty:
         required: false
@@ -57,97 +42,81 @@ on:
         type: string
       quotation_path:
         required: false
-        default: ''
         type: string
 
+run-name: 'QA [${{ inputs.test_suite }}] corr:${{ inputs.correlation_id }}'
+
 jobs:
-  run-qa:
-    name: 'Run [${{ inputs.test_suite }}]'
+  run-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    env:
-      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
 
-      - name: Install Playwright browsers
-        run: npx playwright install chromium firefox --with-deps
+      - run: npx playwright install chromium --with-deps
 
-      - name: Write .env config
-        run: |
-          cat > .env <<ENVEOF
-          BASE_URL=${{ inputs.base_url }}
-          DATABASE=${{ inputs.database }}
-          USERNAME=${{ inputs.username }}
-          PASSWORD=${{ inputs.password }}
-          HEADLESS=true
-          CUSTOMER_SEARCH=${{ inputs.customer_search }}
-          CUSTOMER_NAME=${{ inputs.customer_name }}
-          PRODUCT_SEARCH=${{ inputs.product_search }}
-          PRODUCT_NAME=${{ inputs.product_name }}
-          PRODUCT_QTY=${{ inputs.product_qty }}
-          QUOTATION_PATH=${{ inputs.quotation_path }}
-          ENVEOF
-
-      - name: Run Playwright tests
-        id: run
+      - name: Run tests
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          DATABASE: ${{ inputs.database }}
+          USERNAME: ${{ inputs.username }}
+          PASSWORD: ${{ inputs.password }}
+          HEADLESS: 'true'
+          CUSTOMER_SEARCH: ${{ inputs.customer_search }}
+          CUSTOMER_NAME: ${{ inputs.customer_name }}
+          PRODUCT_SEARCH: ${{ inputs.product_search }}
+          PRODUCT_NAME: ${{ inputs.product_name }}
+          PRODUCT_QTY: ${{ inputs.product_qty || '1' }}
+          QUOTATION_PATH: ${{ inputs.quotation_path }}
         run: |
           SPEC="${{ inputs.test_spec }}"
+          SUITE="${{ inputs.test_suite }}"
           if [ -n "$SPEC" ]; then
-            npx playwright test "$SPEC" \
-              --project="${{ inputs.test_suite }}" \
-              --reporter=list,json,html \
-              2>&1 | tee test-output.txt
+            npx playwright test "$SPEC" --project="$SUITE"
           else
-            npx playwright test \
-              --project="${{ inputs.test_suite }}" \
-              --reporter=list,json,html \
-              2>&1 | tee test-output.txt
+            npx playwright test --project="$SUITE"
           fi
-        continue-on-error: true
 
-      - name: Generate QA Apps summary
+      - name: Generate summary
         if: always()
+        env:
+          CORRELATION_ID: ${{ inputs.correlation_id }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          RESULTS="reports/test-results/results.json"
-          CORR="${{ inputs.correlation_id }}"
-          RUN_ID="${{ github.run_id }}"
-
-          if [ -f "$RESULTS" ]; then
-            PASSED=$(jq -r '.stats.expected // 0' "$RESULTS")
-            FAILED=$(jq -r '.stats.unexpected // 0' "$RESULTS")
-            TOTAL=$(jq -r '.stats.total // 0' "$RESULTS")
-          else
-            PASSED=0; FAILED=1; TOTAL=1
-          fi
-
-          STATUS=$([ "$FAILED" -eq 0 ] && echo "PASSED" || echo "FAILED")
-
           mkdir -p reports
-          printf '{"correlation_id":"%s","status":"%s","stats":{"passed":%s,"failed":%s,"total":%s},"github":{"run_id":"%s","run_url":"%s"}}' \
-            "$CORR" "$STATUS" "$PASSED" "$FAILED" "$TOTAL" "$RUN_ID" "$RUN_URL" \
-            > reports/qa-apps-summary.json
+          node -e "
+          const fs = require('fs');
+          let passed = 0, failed = 0;
+          try {
+            const json = JSON.parse(fs.readFileSync('reports/test-results/results.json', 'utf8'));
+            function count(suites) {
+              for (const s of suites) {
+                for (const spec of (s.specs || [])) {
+                  const ok = spec.tests?.every(t => t.results?.every(r => r.status === 'passed'));
+                  ok ? passed++ : failed++;
+                }
+                count(s.suites || []);
+              }
+            }
+            count(json.suites || []);
+          } catch(e) {}
+          const out = { correlation_id: process.env.CORRELATION_ID, status: failed > 0 ? 'FAILED' : 'PASSED', stats: { passed, failed, total: passed + failed }, github: { run_id: process.env.RUN_ID, run_url: process.env.RUN_URL } };
+          fs.writeFileSync('reports/qa-apps-summary.json', JSON.stringify(out, null, 2));
+          "
 
-          echo "=== QA APPS SUMMARY ===" && cat reports/qa-apps-summary.json
-
-      - name: Upload artifacts
+      - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: qa-result-${{ inputs.correlation_id }}
-          path: |
-            reports/
-            test-output.txt
+          path: reports/
           retention-days: 7
