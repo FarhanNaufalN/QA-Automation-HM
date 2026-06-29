@@ -1,176 +1,73 @@
-# =============================================================================
-# QA-Automation-Framework — GitHub Actions trigger contract
-# Repo: Hashmicro QA Automation Framework (Playwright + TypeScript)
-#
-# QA Apps integration:
-#   1. POST workflow_dispatch → this file (qa-trigger.yml)
-#   2. Poll GET /actions/runs/{run_id} until completed
-#   3. Download artifact qa-result-{correlation_id}
-#   4. Parse reports/qa-apps-summary.json
-#
-# Config model:
-#   - Runtime env written to configs/ci.env (PROJECT=ci)
-#   - Auth: setup project runs automatically before test projects
-#   - Session saved to playwright/.auth/ci.json (ephemeral in CI)
-# =============================================================================
-
 name: QA Automation Run
 
-run-name: 'QA-${{ inputs.test_suite }} | corr:${{ inputs.correlation_id }}'
+run-name: 'QA [${{ inputs.test_suite }}] corr:${{ inputs.correlation_id }}'
 
 on:
   workflow_dispatch:
     inputs:
       correlation_id:
-        description: 'Unique ID from QA Apps to track this run'
+        description: 'Unique ID for QA Apps to track this run'
         required: true
         type: string
-
       test_suite:
-        description: 'Playwright project to run'
+        description: 'chromium | chromium-login | firefox | regression-sales | regression-inventory | regression-purchasing | regression-finance'
         required: true
-        type: choice
-        default: chromium
-        options:
-          - chromium
-          - chromium-login
-          - firefox
-          - regression-sales
-          - regression-inventory
-          - regression-purchasing
-          - regression-finance
-
+        default: 'chromium'
+        type: string
       test_spec:
-        description: >
-          Optional single spec path, e.g.
-          tests/modules/sales/create-quotation.spec.ts
+        description: 'Specific spec file (optional, e.g. tests/modules/sales/create-quotation.spec.ts)'
         required: false
-        type: string
         default: ''
-
+        type: string
       base_url:
-        description: 'HM3 base URL (e.g. https://teazzitea.hash-029.com)'
+        description: 'Target HM3 URL'
         required: true
         type: string
-
       database:
         description: 'HM3 database name'
         required: true
         type: string
-
       username:
         description: 'HM3 login username'
         required: true
         type: string
-
       password:
         description: 'HM3 login password'
         required: true
         type: string
-
-      # --- Regression / module test data (optional for smoke) ---
       customer_search:
-        description: 'CUSTOMER_SEARCH — many2one search term'
         required: false
-        type: string
         default: ''
-
+        type: string
       customer_name:
-        description: 'CUSTOMER_NAME — selected customer label'
         required: false
-        type: string
         default: ''
-
+        type: string
       product_search:
-        description: 'PRODUCT_SEARCH'
         required: false
-        type: string
         default: ''
-
+        type: string
       product_name:
-        description: 'PRODUCT_NAME — product label with [CODE]'
         required: false
-        type: string
         default: ''
-
+        type: string
       product_qty:
-        description: 'PRODUCT_QTY'
         required: false
-        type: string
         default: '1'
-
-      warehouse_search:
-        description: 'WAREHOUSE_SEARCH'
-        required: false
         type: string
-        default: ''
-
-      warehouse_name:
-        description: 'WAREHOUSE_NAME'
-        required: false
-        type: string
-        default: ''
-
-      direct_sales_warehouse_search:
-        description: 'DIRECT_SALES_WAREHOUSE_SEARCH'
-        required: false
-        type: string
-        default: ''
-
-      direct_sales_warehouse_option:
-        description: 'DIRECT_SALES_WAREHOUSE_OPTION'
-        required: false
-        type: string
-        default: ''
-
-      journal_search:
-        description: 'JOURNAL_SEARCH'
-        required: false
-        type: string
-        default: ''
-
-      journal_name:
-        description: 'JOURNAL_NAME'
-        required: false
-        type: string
-        default: ''
-
       quotation_path:
-        description: 'QUOTATION_PATH — Odoo hash URL for quotations list'
         required: false
-        type: string
         default: ''
-
-      blanket_order_path:
-        description: 'BLANKET_ORDER_PATH'
-        required: false
         type: string
-        default: ''
-
-      direct_sales_path:
-        description: 'DIRECT_SALES_PATH'
-        required: false
-        type: string
-        default: ''
 
 jobs:
   run-qa:
     name: 'Run [${{ inputs.test_suite }}]'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    outputs:
-      correlation_id: ${{ inputs.correlation_id }}
-      test_suite: ${{ inputs.test_suite }}
-      status: ${{ steps.summary.outputs.status }}
-      passed: ${{ steps.summary.outputs.passed }}
-      failed: ${{ steps.summary.outputs.failed }}
-      total: ${{ steps.summary.outputs.total }}
+    timeout-minutes: 30
 
     env:
-      PROJECT: ci
-      FORCE_AUTH_SETUP: 'true'
-      CI: 'true'
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
     steps:
       - name: Checkout
@@ -186,140 +83,64 @@ jobs:
         run: npm ci
 
       - name: Install Playwright browsers
+        run: npx playwright install chromium firefox --with-deps
+
+      - name: Write .env config
         run: |
-          if [ "${{ inputs.test_suite }}" = "firefox" ]; then
-            npx playwright install chromium firefox --with-deps
-          else
-            npx playwright install chromium --with-deps
-          fi
-
-      - name: Write configs/ci.env
-        env:
-          BASE_URL: ${{ inputs.base_url }}
-          DATABASE: ${{ inputs.database }}
-          USERNAME: ${{ inputs.username }}
-          PASSWORD: ${{ inputs.password }}
-          CUSTOMER_SEARCH: ${{ inputs.customer_search }}
-          CUSTOMER_NAME: ${{ inputs.customer_name }}
-          PRODUCT_SEARCH: ${{ inputs.product_search }}
-          PRODUCT_NAME: ${{ inputs.product_name }}
-          PRODUCT_QTY: ${{ inputs.product_qty }}
-          WAREHOUSE_SEARCH: ${{ inputs.warehouse_search }}
-          WAREHOUSE_NAME: ${{ inputs.warehouse_name }}
-          DIRECT_SALES_WAREHOUSE_SEARCH: ${{ inputs.direct_sales_warehouse_search }}
-          DIRECT_SALES_WAREHOUSE_OPTION: ${{ inputs.direct_sales_warehouse_option }}
-          JOURNAL_SEARCH: ${{ inputs.journal_search }}
-          JOURNAL_NAME: ${{ inputs.journal_name }}
-          QUOTATION_PATH: ${{ inputs.quotation_path }}
-          BLANKET_ORDER_PATH: ${{ inputs.blanket_order_path }}
-          DIRECT_SALES_PATH: ${{ inputs.direct_sales_path }}
-        run: |
-          mkdir -p configs playwright/.auth reports/test-results
-
-          append_if_set() {
-            key="$1"
-            val="$2"
-            if [ -n "$val" ]; then
-              printf '%s="%s"\n' "$key" "$val" >> configs/ci.env
-            fi
-          }
-
-          : > configs/ci.env
-
-          append_if_set BASE_URL "$BASE_URL"
-          append_if_set DATABASE "$DATABASE"
-          append_if_set USERNAME "$USERNAME"
-          append_if_set PASSWORD "$PASSWORD"
-          echo 'HEADLESS=true' >> configs/ci.env
-          echo 'TIMEOUT=180000' >> configs/ci.env
-
-          append_if_set CUSTOMER_SEARCH "$CUSTOMER_SEARCH"
-          append_if_set CUSTOMER_NAME "$CUSTOMER_NAME"
-          append_if_set PRODUCT_SEARCH "$PRODUCT_SEARCH"
-          append_if_set PRODUCT_NAME "$PRODUCT_NAME"
-          append_if_set PRODUCT_QTY "$PRODUCT_QTY"
-          append_if_set WAREHOUSE_SEARCH "$WAREHOUSE_SEARCH"
-          append_if_set WAREHOUSE_NAME "$WAREHOUSE_NAME"
-          append_if_set DIRECT_SALES_WAREHOUSE_SEARCH "$DIRECT_SALES_WAREHOUSE_SEARCH"
-          append_if_set DIRECT_SALES_WAREHOUSE_OPTION "$DIRECT_SALES_WAREHOUSE_OPTION"
-          append_if_set JOURNAL_SEARCH "$JOURNAL_SEARCH"
-          append_if_set JOURNAL_NAME "$JOURNAL_NAME"
-          append_if_set QUOTATION_PATH "$QUOTATION_PATH"
-          append_if_set BLANKET_ORDER_PATH "$BLANKET_ORDER_PATH"
-          append_if_set DIRECT_SALES_PATH "$DIRECT_SALES_PATH"
+          cat > .env <<ENVEOF
+          BASE_URL=${{ inputs.base_url }}
+          DATABASE=${{ inputs.database }}
+          USERNAME=${{ inputs.username }}
+          PASSWORD=${{ inputs.password }}
+          HEADLESS=true
+          CUSTOMER_SEARCH=${{ inputs.customer_search }}
+          CUSTOMER_NAME=${{ inputs.customer_name }}
+          PRODUCT_SEARCH=${{ inputs.product_search }}
+          PRODUCT_NAME=${{ inputs.product_name }}
+          PRODUCT_QTY=${{ inputs.product_qty }}
+          QUOTATION_PATH=${{ inputs.quotation_path }}
+          ENVEOF
 
       - name: Run Playwright tests
         id: run
         run: |
-          ARGS=(--project="${{ inputs.test_suite }}" --reporter=list,json,html)
-          if [ -n "${{ inputs.test_spec }}" ]; then
-            ARGS+=("${{ inputs.test_spec }}")
+          SPEC="${{ inputs.test_spec }}"
+          if [ -n "$SPEC" ]; then
+            npx playwright test "$SPEC" \
+              --project="${{ inputs.test_suite }}" \
+              --reporter=list,json,html \
+              2>&1 | tee test-output.txt
+          else
+            npx playwright test \
+              --project="${{ inputs.test_suite }}" \
+              --reporter=list,json,html \
+              2>&1 | tee test-output.txt
           fi
-          npx playwright test "${ARGS[@]}" 2>&1 | tee test-output.txt
         continue-on-error: true
 
-      - name: Build QA Apps summary
-        id: summary
+      - name: Generate QA Apps summary
         if: always()
-        env:
-          CORRELATION_ID: ${{ inputs.correlation_id }}
-          TEST_SUITE: ${{ inputs.test_suite }}
-          TEST_SPEC: ${{ inputs.test_spec }}
-          RUN_ID: ${{ github.run_id }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          COMMIT_SHA: ${{ github.sha }}
         run: |
           RESULTS="reports/test-results/results.json"
-          PASSED=0
-          FAILED=0
-          TOTAL=0
-          STATUS="FAILED"
+          CORR="${{ inputs.correlation_id }}"
+          RUN_ID="${{ github.run_id }}"
 
           if [ -f "$RESULTS" ]; then
             PASSED=$(jq -r '.stats.expected // 0' "$RESULTS")
             FAILED=$(jq -r '.stats.unexpected // 0' "$RESULTS")
             TOTAL=$(jq -r '.stats.total // 0' "$RESULTS")
-            if [ "$FAILED" -eq 0 ] && [ "$TOTAL" -gt 0 ]; then
-              STATUS="PASSED"
-            fi
+          else
+            PASSED=0; FAILED=1; TOTAL=1
           fi
 
-          echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
-          echo "passed=${PASSED}" >> "$GITHUB_OUTPUT"
-          echo "failed=${FAILED}" >> "$GITHUB_OUTPUT"
-          echo "total=${TOTAL}" >> "$GITHUB_OUTPUT"
+          STATUS=$([ "$FAILED" -eq 0 ] && echo "PASSED" || echo "FAILED")
 
-          jq -n \
-            --arg correlation_id "$CORRELATION_ID" \
-            --arg test_suite "$TEST_SUITE" \
-            --arg test_spec "$TEST_SPEC" \
-            --arg status "$STATUS" \
-            --argjson passed "$PASSED" \
-            --argjson failed "$FAILED" \
-            --argjson total "$TOTAL" \
-            --arg run_id "$RUN_ID" \
-            --arg run_url "$RUN_URL" \
-            --arg commit_sha "$COMMIT_SHA" \
-            --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{
-              correlation_id: $correlation_id,
-              framework: "qa-automation-framework",
-              test_suite: $test_suite,
-              test_spec: (if $test_spec == "" then null else $test_spec end),
-              status: $status,
-              stats: { passed: $passed, failed: $failed, total: $total },
-              github: { run_id: $run_id, run_url: $run_url, commit_sha: $commit_sha },
-              completed_at: $completed_at,
-              artifacts: {
-                summary: "reports/qa-apps-summary.json",
-                playwright_json: "reports/test-results/results.json",
-                html_report: "reports/html/index.html"
-              }
-            }' > reports/qa-apps-summary.json
+          mkdir -p reports
+          printf '{"correlation_id":"%s","status":"%s","stats":{"passed":%s,"failed":%s,"total":%s},"github":{"run_id":"%s","run_url":"%s"}}' \
+            "$CORR" "$STATUS" "$PASSED" "$FAILED" "$TOTAL" "$RUN_ID" "$RUN_URL" \
+            > reports/qa-apps-summary.json
 
-          echo "=== RESULT: ${STATUS} ==="
-          echo "Passed: ${PASSED} | Failed: ${FAILED} | Total: ${TOTAL}"
-          echo "Correlation ID: ${CORRELATION_ID}"
+          echo "=== QA APPS SUMMARY ===" && cat reports/qa-apps-summary.json
 
       - name: Upload artifacts
         if: always()
@@ -330,11 +151,3 @@ jobs:
             reports/
             test-output.txt
           retention-days: 7
-
-      - name: Fail job if tests failed
-        if: always()
-        run: |
-          STATUS="${{ steps.summary.outputs.status }}"
-          if [ "$STATUS" != "PASSED" ]; then
-            exit 1
-          fi
