@@ -1,0 +1,143 @@
+{
+  "framework": "qa-automation-framework",
+  "repository": "Hashmicro/QA-Automation-Framework",
+  "workflow_file": ".github/workflows/qa-trigger.yml",
+  "workflow_name": "QA Automation Run",
+  "trigger": "workflow_dispatch",
+  "description": "Playwright E2E tests for Hashmicro HM3 (Odoo). Runtime config is written to configs/ci.env with PROJECT=ci.",
+  "api": {
+    "trigger": {
+      "method": "POST",
+      "path": "/repos/{owner}/{repo}/actions/workflows/qa-trigger.yml/dispatches",
+      "headers": {
+        "Authorization": "Bearer {GITHUB_PAT}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28"
+      },
+      "body": {
+        "ref": "main",
+        "inputs": {
+          "correlation_id": "{uuid-from-qa-apps}",
+          "test_suite": "regression-sales",
+          "test_spec": "tests/modules/sales/create-quotation.spec.ts",
+          "base_url": "https://teazzitea.hash-029.com",
+          "database": "teazzitea-score22-master-core-db",
+          "username": "admin",
+          "password": "{secret}",
+          "customer_search": "INTERGRAL",
+          "customer_name": "INTERGRAL DATA PRIMA PT",
+          "product_search": "DFO-301",
+          "product_name": "[DFO-301] 5DAYS CROISSANT MIX BERRIES 60 GR",
+          "product_qty": "1",
+          "warehouse_search": "Jakarta",
+          "warehouse_name": "Jakarta Warehouse",
+          "quotation_path": "/web#action=459&model=sale.order&view_type=list&cids=1,40,82&bids=1&menu_id=320"
+        }
+      }
+    },
+    "poll_run": {
+      "method": "GET",
+      "path": "/repos/{owner}/{repo}/actions/runs/{run_id}",
+      "completed_when": "status === 'completed'",
+      "success_when": "conclusion === 'success'"
+    },
+    "download_artifact": {
+      "method": "GET",
+      "path": "/repos/{owner}/{repo}/actions/runs/{run_id}/artifacts",
+      "artifact_name_pattern": "qa-result-{correlation_id}",
+      "parse_file": "reports/qa-apps-summary.json"
+    }
+  },
+  "inputs": {
+    "required": [
+      "correlation_id",
+      "test_suite",
+      "base_url",
+      "database",
+      "username",
+      "password"
+    ],
+    "optional": [
+      "test_spec",
+      "customer_search",
+      "customer_name",
+      "product_search",
+      "product_name",
+      "product_qty",
+      "warehouse_search",
+      "warehouse_name",
+      "direct_sales_warehouse_search",
+      "direct_sales_warehouse_option",
+      "journal_search",
+      "journal_name",
+      "quotation_path",
+      "blanket_order_path",
+      "direct_sales_path"
+    ]
+  },
+  "test_suites": {
+    "chromium": {
+      "description": "Smoke tests (dashboard, crud, approval) — excludes login.spec and modules",
+      "tests_path": "tests/smoke/",
+      "needs_regression_data": false
+    },
+    "chromium-login": {
+      "description": "Login/logout smoke only",
+      "tests_path": "tests/smoke/login.spec.ts",
+      "needs_regression_data": false
+    },
+    "firefox": {
+      "description": "Smoke tests on Firefox",
+      "tests_path": "tests/smoke/",
+      "needs_regression_data": false
+    },
+    "regression-sales": {
+      "description": "Sales module regression",
+      "tests_path": "tests/modules/sales/",
+      "available_specs": [
+        "tests/modules/sales/create-quotation.spec.ts",
+        "tests/modules/sales/create-blanket-order.spec.ts",
+        "tests/modules/sales/create-direct-order.spec.ts"
+      ],
+      "needs_regression_data": true
+    },
+    "regression-inventory": {
+      "description": "Inventory module regression",
+      "tests_path": "tests/modules/inventory/",
+      "needs_regression_data": true
+    },
+    "regression-purchasing": {
+      "description": "Purchasing module regression (no specs yet)",
+      "tests_path": "tests/modules/purchasing/",
+      "needs_regression_data": true
+    },
+    "regression-finance": {
+      "description": "Finance module regression (no specs yet)",
+      "tests_path": "tests/modules/finance/",
+      "needs_regression_data": true
+    }
+  },
+  "summary_schema": {
+    "correlation_id": "string",
+    "framework": "qa-automation-framework",
+    "test_suite": "string",
+    "test_spec": "string | null",
+    "status": "PASSED | FAILED",
+    "stats": {
+      "passed": "number",
+      "failed": "number",
+      "total": "number"
+    },
+    "github": {
+      "run_id": "string",
+      "run_url": "string",
+      "commit_sha": "string"
+    },
+    "completed_at": "ISO-8601 UTC"
+  },
+  "github_pat_scopes": [
+    "actions:read",
+    "actions:write",
+    "contents:read"
+  ]
+}

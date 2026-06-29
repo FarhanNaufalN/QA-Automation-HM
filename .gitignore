@@ -10,5 +10,6 @@ playwright/.auth/*.json
 .env
 configs/score22.env
 configs/teazie.env
+configs/ci.env
 *.log
 .DS_Store
