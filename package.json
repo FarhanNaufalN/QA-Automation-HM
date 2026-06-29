@@ -24,6 +24,11 @@
     "test:headed": "playwright test --headed",
     "test:ui": "playwright test --ui",
     "test:debug": "playwright test --debug",
+    "auth:setup": "playwright test --project=setup",
+    "auth:setup:teazie": "cross-env PROJECT=teazie playwright test --project=setup",
+    "auth:setup:score22": "cross-env PROJECT=score22 playwright test --project=setup",
+    "auth:setup:all": "cross-env PROJECT=teazie playwright test --project=setup && cross-env PROJECT=score22 playwright test --project=setup",
+    "auth:setup:force": "cross-env FORCE_AUTH_SETUP=true playwright test --project=setup",
     "report": "playwright show-report reports/html",
     "codegen": "playwright codegen"
   },

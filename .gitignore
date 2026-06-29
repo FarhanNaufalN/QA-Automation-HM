@@ -6,6 +6,7 @@ reports/blob-report/
 test-results/
 playwright-report/
 playwright/.cache/
+playwright/.auth/*.json
 .env
 configs/score22.env
 configs/teazie.env

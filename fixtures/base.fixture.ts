@@ -8,7 +8,6 @@ import {
   ExportImportHelper,
 } from '../helpers';
 import { getConfig, type ProjectConfig } from '../utils/env';
-import { log } from '../utils/logger';
 
 type FrameworkFixtures = {
   config: ProjectConfig;
@@ -70,10 +69,8 @@ export const test = base.extend<FrameworkFixtures>({
     await use(new ExportImportHelper(page));
   },
 
-  authenticatedPage: async ({ page, login, config }, use) => {
-    log('Login', `project=${config.project} db=${config.database || 'default'}`);
-    await login.gotoLoginPage();
-    await login.login();
+  /** Session comes from playwright project storageState — no per-test login. */
+  authenticatedPage: async ({}, use) => {
     await use();
   },
 });

@@ -1,9 +1,21 @@
 import { defineConfig, devices } from '@playwright/test';
+import { getAuthStoragePath } from './utils/auth';
 import { loadProjectEnv, getConfig } from './utils/env';
 
 loadProjectEnv();
 
 const config = getConfig();
+const authStorageState = getAuthStoragePath(config.project);
+
+const chromeUse = {
+  ...devices['Desktop Chrome'],
+  storageState: authStorageState,
+};
+
+const firefoxUse = {
+  ...devices['Desktop Firefox'],
+  storageState: authStorageState,
+};
 
 export default defineConfig({
   testDir: './tests',
@@ -23,40 +35,55 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
-    actionTimeout: config.timeout,
-    navigationTimeout: config.timeout,
+    actionTimeout: 30_000,
+    navigationTimeout: 60_000,
   },
   projects: [
     {
+      name: 'setup',
+      testMatch: /auth\.setup\.ts/,
+    },
+    {
       name: 'chromium',
+      dependencies: ['setup'],
+      use: chromeUse,
+      testIgnore: [/tests\/modules\//, /auth\.setup\.ts/, /tests\/smoke\/login\.spec\.ts/],
+    },
+    {
+      name: 'chromium-login',
+      testMatch: /tests\/smoke\/login\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
-      testIgnore: [/tests\/modules\//],
     },
     {
       name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
-      testIgnore: [/tests\/modules\//],
+      dependencies: ['setup'],
+      use: firefoxUse,
+      testIgnore: [/tests\/modules\//, /auth\.setup\.ts/, /tests\/smoke\/login\.spec\.ts/],
     },
     // Regression — per ERP module (chromium only)
     {
       name: 'regression-sales',
+      dependencies: ['setup'],
       testMatch: /tests\/modules\/sales\/.*/,
-      use: { ...devices['Desktop Chrome'] },
+      use: chromeUse,
     },
     {
       name: 'regression-inventory',
+      dependencies: ['setup'],
       testMatch: /tests\/modules\/inventory\/.*/,
-      use: { ...devices['Desktop Chrome'] },
+      use: chromeUse,
     },
     {
       name: 'regression-purchasing',
+      dependencies: ['setup'],
       testMatch: /tests\/modules\/purchasing\/.*/,
-      use: { ...devices['Desktop Chrome'] },
+      use: chromeUse,
     },
     {
       name: 'regression-finance',
+      dependencies: ['setup'],
       testMatch: /tests\/modules\/finance\/.*/,
-      use: { ...devices['Desktop Chrome'] },
+      use: chromeUse,
     },
   ],
   outputDir: 'reports/test-results',
