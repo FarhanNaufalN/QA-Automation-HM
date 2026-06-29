@@ -4,7 +4,7 @@
   "workflow_file": ".github/workflows/qa-trigger.yml",
   "workflow_name": "QA Automation Run",
   "trigger": "workflow_dispatch",
-  "description": "Playwright E2E tests for Hashmicro HM3 (Odoo). Runtime config is written to configs/ci.env with PROJECT=ci.",
+  "description": "Playwright E2E tests for Hashmicro HM3 (Odoo). Workflow writes configs/trigger.env and sets PROJECT=trigger before tests run.",
   "api": {
     "trigger": {
       "method": "POST",

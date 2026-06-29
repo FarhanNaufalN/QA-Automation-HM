@@ -43,13 +43,42 @@ on:
       quotation_path:
         required: false
         type: string
+      warehouse_search:
+        required: false
+        type: string
+      warehouse_name:
+        required: false
+        type: string
+      blanket_order_path:
+        required: false
+        type: string
+      direct_sales_path:
+        required: false
+        type: string
+      journal_search:
+        required: false
+        type: string
+      journal_name:
+        required: false
+        type: string
+      direct_sales_warehouse_search:
+        required: false
+        type: string
+      direct_sales_warehouse_option:
+        required: false
+        type: string
 
 run-name: 'QA [${{ inputs.test_suite }}] corr:${{ inputs.correlation_id }}'
 
 jobs:
   run-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+
+    env:
+      PROJECT: trigger
+      FORCE_AUTH_SETUP: 'true'
+      CI: 'true'
 
     steps:
       - uses: actions/checkout@v4
@@ -63,19 +92,63 @@ jobs:
 
       - run: npx playwright install chromium --with-deps
 
-      - name: Run tests
+      - name: Write project config
         env:
           BASE_URL: ${{ inputs.base_url }}
           DATABASE: ${{ inputs.database }}
           USERNAME: ${{ inputs.username }}
           PASSWORD: ${{ inputs.password }}
-          HEADLESS: 'true'
           CUSTOMER_SEARCH: ${{ inputs.customer_search }}
           CUSTOMER_NAME: ${{ inputs.customer_name }}
           PRODUCT_SEARCH: ${{ inputs.product_search }}
           PRODUCT_NAME: ${{ inputs.product_name }}
-          PRODUCT_QTY: ${{ inputs.product_qty || '1' }}
+          PRODUCT_QTY: ${{ inputs.product_qty }}
           QUOTATION_PATH: ${{ inputs.quotation_path }}
+          WAREHOUSE_SEARCH: ${{ inputs.warehouse_search }}
+          WAREHOUSE_NAME: ${{ inputs.warehouse_name }}
+          BLANKET_ORDER_PATH: ${{ inputs.blanket_order_path }}
+          DIRECT_SALES_PATH: ${{ inputs.direct_sales_path }}
+          JOURNAL_SEARCH: ${{ inputs.journal_search }}
+          JOURNAL_NAME: ${{ inputs.journal_name }}
+          DIRECT_SALES_WAREHOUSE_SEARCH: ${{ inputs.direct_sales_warehouse_search }}
+          DIRECT_SALES_WAREHOUSE_OPTION: ${{ inputs.direct_sales_warehouse_option }}
+        run: |
+          mkdir -p configs playwright/.auth reports/test-results
+          : > configs/trigger.env
+
+          append_if_set() {
+            key="$1"
+            val="$2"
+            if [ -n "$val" ]; then
+              printf '%s="%s"\n' "$key" "$val" >> configs/trigger.env
+            fi
+          }
+
+          append_if_set BASE_URL "$BASE_URL"
+          append_if_set DATABASE "$DATABASE"
+          append_if_set USERNAME "$USERNAME"
+          append_if_set PASSWORD "$PASSWORD"
+          append_if_set CUSTOMER_SEARCH "$CUSTOMER_SEARCH"
+          append_if_set CUSTOMER_NAME "$CUSTOMER_NAME"
+          append_if_set PRODUCT_SEARCH "$PRODUCT_SEARCH"
+          append_if_set PRODUCT_NAME "$PRODUCT_NAME"
+          append_if_set PRODUCT_QTY "$PRODUCT_QTY"
+          append_if_set QUOTATION_PATH "$QUOTATION_PATH"
+          append_if_set WAREHOUSE_SEARCH "$WAREHOUSE_SEARCH"
+          append_if_set WAREHOUSE_NAME "$WAREHOUSE_NAME"
+          append_if_set BLANKET_ORDER_PATH "$BLANKET_ORDER_PATH"
+          append_if_set DIRECT_SALES_PATH "$DIRECT_SALES_PATH"
+          append_if_set JOURNAL_SEARCH "$JOURNAL_SEARCH"
+          append_if_set JOURNAL_NAME "$JOURNAL_NAME"
+          append_if_set DIRECT_SALES_WAREHOUSE_SEARCH "$DIRECT_SALES_WAREHOUSE_SEARCH"
+          append_if_set DIRECT_SALES_WAREHOUSE_OPTION "$DIRECT_SALES_WAREHOUSE_OPTION"
+
+          echo 'HEADLESS=true' >> configs/trigger.env
+          echo 'TIMEOUT=180000' >> configs/trigger.env
+
+          echo "Wrote configs/trigger.env (PROJECT=trigger)"
+
+      - name: Run Playwright tests
         run: |
           SPEC="${{ inputs.test_spec }}"
           SUITE="${{ inputs.test_suite }}"
@@ -84,11 +157,14 @@ jobs:
           else
             npx playwright test --project="$SUITE"
           fi
+        continue-on-error: true
 
       - name: Generate summary
         if: always()
         env:
           CORRELATION_ID: ${{ inputs.correlation_id }}
+          TEST_SUITE: ${{ inputs.test_suite }}
+          TEST_SPEC: ${{ inputs.test_spec }}
           RUN_ID: ${{ github.run_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -98,19 +174,24 @@ jobs:
           let passed = 0, failed = 0;
           try {
             const json = JSON.parse(fs.readFileSync('reports/test-results/results.json', 'utf8'));
-            function count(suites) {
-              for (const s of suites) {
-                for (const spec of (s.specs || [])) {
-                  const ok = spec.tests?.every(t => t.results?.every(r => r.status === 'passed'));
-                  ok ? passed++ : failed++;
-                }
-                count(s.suites || []);
-              }
-            }
-            count(json.suites || []);
+            passed = json.stats?.expected ?? 0;
+            failed = json.stats?.unexpected ?? 0;
           } catch(e) {}
-          const out = { correlation_id: process.env.CORRELATION_ID, status: failed > 0 ? 'FAILED' : 'PASSED', stats: { passed, failed, total: passed + failed }, github: { run_id: process.env.RUN_ID, run_url: process.env.RUN_URL } };
+          const total = passed + failed;
+          const status = failed > 0 || total === 0 ? 'FAILED' : 'PASSED';
+          const out = {
+            correlation_id: process.env.CORRELATION_ID,
+            framework: 'qa-automation-framework',
+            project: 'trigger',
+            test_suite: process.env.TEST_SUITE,
+            test_spec: process.env.TEST_SPEC || null,
+            status,
+            stats: { passed, failed, total },
+            github: { run_id: process.env.RUN_ID, run_url: process.env.RUN_URL }
+          };
           fs.writeFileSync('reports/qa-apps-summary.json', JSON.stringify(out, null, 2));
+          console.log('=== RESULT:', status, '===');
+          console.log('Passed:', passed, '| Failed:', failed, '| Total:', total);
           "
 
       - name: Upload artifact
@@ -118,5 +199,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qa-result-${{ inputs.correlation_id }}
-          path: reports/
+          path: |
+            reports/
+            test-output.txt
           retention-days: 7
+
+      - name: Fail job if tests failed
+        if: always()
+        run: |
+          node -e "
+          const fs = require('fs');
+          const p = 'reports/qa-apps-summary.json';
+          if (!fs.existsSync(p)) process.exit(1);
+          const s = JSON.parse(fs.readFileSync(p, 'utf8'));
+          process.exit(s.status === 'PASSED' ? 0 : 1);
+          "
