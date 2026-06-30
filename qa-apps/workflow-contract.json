@@ -44,7 +44,7 @@
     "download_artifact": {
       "method": "GET",
       "path": "/repos/{owner}/{repo}/actions/runs/{run_id}/artifacts",
-      "artifact_name_pattern": "qa-result-{correlation_id}",
+      "artifact_name_pattern": "qa-report-{correlation_id}",
       "parse_file": "reports/qa-apps-summary.json"
     }
   },
@@ -119,9 +119,6 @@
   },
   "summary_schema": {
     "correlation_id": "string",
-    "framework": "qa-automation-framework",
-    "test_suite": "string",
-    "test_spec": "string | null",
     "status": "PASSED | FAILED",
     "stats": {
       "passed": "number",
@@ -130,10 +127,14 @@
     },
     "github": {
       "run_id": "string",
-      "run_url": "string",
-      "commit_sha": "string"
+      "run_url": "string"
     },
-    "completed_at": "ISO-8601 UTC"
+    "screenshots": [
+      {
+        "name": "string — relative path to PNG",
+        "data": "string — base64-encoded PNG (max 10 per run)"
+      }
+    ]
   },
   "github_pat_scopes": [
     "actions:read",
