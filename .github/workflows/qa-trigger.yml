@@ -167,60 +167,7 @@ jobs:
           CORRELATION_ID: ${{ inputs.correlation_id }}
           RUN_ID: ${{ github.run_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          node -e "
-          const fs = require('fs');
-          const path = require('path');
-
-          function findPNGs(dir) {
-            const out = [];
-            if (!fs.existsSync(dir)) return out;
-            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-              const full = path.join(dir, entry.name);
-              if (entry.isDirectory()) out.push(...findPNGs(full));
-              else if (entry.isFile() && entry.name.endsWith('.png')) out.push(full);
-            }
-            return out;
-          }
-
-          let passed = 0, failed = 0;
-          try {
-            const xml = fs.readFileSync('test-results/results.xml', 'utf8');
-            const pm = xml.match(/tests=\"(\d+)\"/g) || [];
-            const fm = xml.match(/failures=\"(\d+)\"/g) || [];
-            pm.forEach(m => { passed += parseInt(m.replace(/[^\d]/g,'')) || 0; });
-            fm.forEach(m => { failed += parseInt(m.replace(/[^\d]/g,'')) || 0; });
-            passed -= failed;
-          } catch {
-            try {
-              const json = JSON.parse(fs.readFileSync('reports/test-results/results.json', 'utf8'));
-              passed = json.stats?.expected ?? 0;
-              failed = json.stats?.unexpected ?? 0;
-            } catch {}
-          }
-
-          const screenshotRoots = ['reports/test-results', 'test-results'];
-          const pngFiles = screenshotRoots
-            .flatMap(root => findPNGs(root))
-            .sort()
-            .slice(0, 10);
-          const screenshots = pngFiles.map(f => ({
-            name: f.replace(/\\\\/g, '/'),
-            data: fs.readFileSync(f).toString('base64')
-          }));
-
-          const summary = {
-            correlation_id: process.env.CORRELATION_ID,
-            status: failed > 0 ? 'FAILED' : 'PASSED',
-            stats: { passed, failed, total: passed + failed },
-            github: { run_id: process.env.RUN_ID, run_url: process.env.RUN_URL },
-            screenshots
-          };
-
-          fs.mkdirSync('reports', { recursive: true });
-          fs.writeFileSync('reports/qa-apps-summary.json', JSON.stringify(summary));
-          console.log('Summary written. Screenshots:', screenshots.length);
-          "
+        run: node scripts/generate-qa-apps-summary.js
 
       - name: Upload artifacts
         if: always()
