@@ -79,6 +79,7 @@ jobs:
       PROJECT: trigger
       FORCE_AUTH_SETUP: 'true'
       CI: 'true'
+      SCREENSHOT_MODE: 'on'
 
     steps:
       - uses: actions/checkout@v4
@@ -154,11 +155,11 @@ jobs:
           SUITE="${{ inputs.test_suite }}"
           mkdir -p test-results
           if [ -n "$SPEC" ]; then
-            npx playwright test "$SPEC" --project="$SUITE" --screenshot=on \
-              --reporter=junit,outputFile=test-results/results.xml
+            npx playwright test "$SPEC" --project="$SUITE" \
+              --reporter=list --reporter=junit,outputFile=test-results/results.xml
           else
-            npx playwright test --project="$SUITE" --screenshot=on \
-              --reporter=junit,outputFile=test-results/results.xml
+            npx playwright test --project="$SUITE" \
+              --reporter=list --reporter=junit,outputFile=test-results/results.xml
           fi
         continue-on-error: true
 

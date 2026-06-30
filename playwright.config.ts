@@ -33,7 +33,7 @@ export default defineConfig({
     baseURL: config.baseUrl,
     headless: config.headless,
     trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
+    screenshot: process.env.SCREENSHOT_MODE === 'on' ? 'on' : 'only-on-failure',
     video: 'retain-on-failure',
     actionTimeout: 30_000,
     navigationTimeout: 60_000,
