@@ -35,9 +35,9 @@ export default defineConfig({
   use: {
     baseURL: config.baseUrl,
     headless: config.headless,
-    trace: 'on-first-retry',
+    trace: process.env.CI ? 'off' : 'on-first-retry',
     screenshot: process.env.SCREENSHOT_MODE === 'on' ? 'on' : 'only-on-failure',
-    video: 'retain-on-failure',
+    video: process.env.CI ? 'off' : 'retain-on-failure',
     actionTimeout: 30_000,
     navigationTimeout: 60_000,
   },
