@@ -28,6 +28,9 @@ export default defineConfig({
     ['list'],
     ['html', { outputFolder: 'reports/html', open: 'never' }],
     ['json', { outputFile: 'reports/test-results/results.json' }],
+    ...(process.env.CI
+      ? [['junit', { outputFile: 'test-results/results.xml' }] as const]
+      : []),
   ],
   use: {
     baseURL: config.baseUrl,

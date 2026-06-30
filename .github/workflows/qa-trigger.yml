@@ -155,11 +155,9 @@ jobs:
           SUITE="${{ inputs.test_suite }}"
           mkdir -p test-results
           if [ -n "$SPEC" ]; then
-            npx playwright test "$SPEC" --project="$SUITE" \
-              --reporter=list --reporter=junit,outputFile=test-results/results.xml
+            npx playwright test "$SPEC" --project="$SUITE"
           else
-            npx playwright test --project="$SUITE" \
-              --reporter=list --reporter=junit,outputFile=test-results/results.xml
+            npx playwright test --project="$SUITE"
           fi
         continue-on-error: true
 
@@ -193,7 +191,13 @@ jobs:
             pm.forEach(m => { passed += parseInt(m.replace(/[^\d]/g,'')) || 0; });
             fm.forEach(m => { failed += parseInt(m.replace(/[^\d]/g,'')) || 0; });
             passed -= failed;
-          } catch {}
+          } catch {
+            try {
+              const json = JSON.parse(fs.readFileSync('reports/test-results/results.json', 'utf8'));
+              passed = json.stats?.expected ?? 0;
+              failed = json.stats?.unexpected ?? 0;
+            } catch {}
+          }
 
           const screenshotRoots = ['reports/test-results', 'test-results'];
           const pngFiles = screenshotRoots
